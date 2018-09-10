@@ -37,6 +37,9 @@ if "bpy" in locals():
     import importlib
     if "export_datasmith" in locals():
         importlib.reload(export_datasmith)
+    if "import_datasmith" in locals():
+        importlib.reload(import_datasmith)
+
 
 
 import bpy
@@ -53,6 +56,35 @@ from bpy_extras.io_utils import (
         path_reference_mode,
         axis_conversion,
         )
+
+class ImportDatasmith(bpy.types.Operator, ImportHelper):
+    """Load a Datasmith file"""
+    bl_idname = "import_scene.udatasmith"
+    bl_label = "Import Datasmith"
+    bl_options = {'PRESET', 'UNDO'}
+
+    filename_ext = ".udatasmith"
+    filter_glob = StringProperty(
+        default="*.udatasmith",
+        options={'HIDDEN'}
+    )
+
+    use_smooth_groups = BoolProperty(
+        name="Smooth Groups",
+        description="Surround smooth groups by sharp edges",
+        default=True,
+    )
+
+    def execute(self, context):
+        keywords = self.as_keywords(ignore=("filter_glob",))
+        from . import import_datasmith
+        return import_datasmith.load(self, context, **keywords)
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.prop(self, 'use_smooth_groups')
+        
 
 class ExportDatasmith(bpy.types.Operator, ExportHelper):
     """Write a Datasmith file"""
@@ -207,11 +239,14 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 
 
 def menu_func_export(self, context):
-    self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.datasmith)")
+    self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.udatasmith)")
 
+def menu_func_import(self, context):
+    self.layout.operator(ImportDatasmith.bl_idname, text="Datasmith (.udatasmith)")
 
 classes = (
     ExportDatasmith,
+    ImportDatasmith,
 )
 
 
@@ -220,10 +255,12 @@ def register():
         bpy.utils.register_class(cls)
 
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
 
 
 def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
 
     for cls in classes:
         bpy.utils.unregister_class(cls)
