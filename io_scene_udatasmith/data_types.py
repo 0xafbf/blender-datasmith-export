@@ -130,18 +130,21 @@ class UDActor:
     class Transform:
         def __init__(self, tx=0, ty=0, tz=0, 
                      qw=0, qx=0, qy=0, qz=0,
-                     sx=0, sy=0, sz=0):
+                     sx=0, sy=0, sz=0, qhex = None):
             self.loc = (float(tx), float(ty), float(tz))
             self.rot = (float(qw), float(qx), float(qy), float(qz))
             self.scale = (float(sx), float(sy), float(sz))
+            # don't know what qhex is
 
     def __init__(self, *, parent, node=None):
         if node:
             self.name = node.attrib['name']
             self.objects = {}
             node_transform = node.find('Transform')
-            if node_transform:
+            if node_transform is not None:
                 self.transform = UDActor.Transform(**node_transform.attrib)
+            else:
+                import pdb; pdb.set_trace()
             node_children = node.find('children')
             if node_children:
                 for child in node_children:

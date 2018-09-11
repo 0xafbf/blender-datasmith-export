@@ -2,7 +2,9 @@ import sys
 import struct
 import bpy
 import bmesh
-from .data_types import UDMesh, UDScene
+from mathutils import Matrix
+
+from .data_types import UDMesh, UDScene, UDActor
 
 b_major, b_minor, b_patch = bpy.app.version
 
@@ -14,7 +16,8 @@ def load_materials(scene:UDScene):
             blender_mat = bpy.data.materials.new(name)
         
         # here maybe something like mat.populate(blender_mat) ?
-    
+
+
 def load_meshes(uscene: UDScene):
     for name, umesh in uscene.meshes.items():
         blender_mesh = bpy.data.meshes.get(umesh.name)
@@ -33,21 +36,39 @@ def load_meshes(uscene: UDScene):
 
         # maybe we can do here some updates even if already existed?
 
+def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
+    b_object = bpy.data.objects.get(name)
+    if not b_object:
+        mesh_name = getattr(actor, 'mesh', None) # is not valid in plain actors
+        b_mesh = None
+        if mesh_name:
+            b_mesh = bpy.data.meshes.get(mesh_name)
+        
+        b_object = bpy.data.objects.new(name, b_mesh)
+        b_object.location = actor.transform.loc
+        b_object.rotation_quaternion = actor.transform.rot
+        b_object.scale = actor.transform.scale
+        if b_minor >= 80:
+            context.scene.collection.objects.link(b_object)
+            # maybe in the future it would be good to use collections instead of empties?
+        else:
+            context.scene.objects.link(b_object)
+
+        #load children
+        for child_name, child in actor.objects.items():
+            load_actor(context, child_name, child, b_object)
+
+        if parent:
+            b_parent = bpy.data.objects.get(parent.name)
+            if b_parent:
+                # pass
+                #b_object.parent = b_parent
+                #b_object.matrix_parent_inverse = b_parent.matrix_world.inverted()
+
 
 def load_objects(uscene: UDScene, context):
-    for name, uobject in uscene.actors.items():
-        b_object = bpy.data.objects.get(name)
-        if not b_object:
-            b_mesh = bpy.data.meshes.get(uobject.mesh)
-            b_object = bpy.data.objects.new(name, b_mesh)
-            b_object.location = uobject.loc
-            b_object.rotation_quaternion = uobject.rot
-            b_object.scale = uobject.scale
-            if b_minor >= 80:
-                context.scene.collection.objects.link(b_object)
-            else:
-                context.scene.objects.link(b_object)
-            
+    for name, uobject in uscene.objects.items():
+        load_actor(context, name, uobject)
         # maybe update transform conditionally (for example if I move things in other app)
 
 
@@ -58,20 +79,4 @@ def load(operator, context, filepath, *, use_smooth_groups = False):
     load_objects(scene, context=context)
     return {'FINISHED'}
 
-#if __name__ == '__main__':
-    # this won't work without blender anymore
-    # load(None, "C:/Users/boterock/Desktop/ud_test.udatasmith")
-
-
-    #load("C:/Users/boterock/Desktop/cube.udatasmith")
-
-
-
-# '''
-# for testing inside blender console:
-
-#     from io_scene_udatasmith.data_types import UDScene
-#     scene = UDScene(path="C:\\Users\\boterock\\Desktop\\cube.udatasmith")
-
-# '''
 
