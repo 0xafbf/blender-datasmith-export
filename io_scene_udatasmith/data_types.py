@@ -106,16 +106,6 @@ class UDMesh:
             assert self.a08 == b'\x00\x00\x00\x00' # just to be sure its the end
             
 
-    
-    def report(self):
-        print(f'UDMESH {self.name}')
-        print(f'    Vertices: {len(self.vertices)}')
-        print(f'    Triangles: {len(self.triangles)}/3')
-        print(f'    Normals: {len(self.vertex_normals)}')
-        print(f'    UVs: {len(self.uvs)}')
-        
-        
-
 class UDMaterial:
     def __new__(cls, name: str, parent=None, **kwargs):
         try:
@@ -136,24 +126,40 @@ class UDMasterMaterial(UDMaterial):
     ''' has params Type and Quality'''
     pass
 
-class UDActor(UDMaterial):
+class UDActor:
+    class Transform:
+        def __init__(self, tx=0, ty=0, tz=0, 
+                     qw=0, qx=0, qy=0, qz=0,
+                     sx=0, sy=0, sz=0):
+            self.loc = (float(tx), float(ty), float(tz))
+            self.rot = (float(qw), float(qx), float(qy), float(qz))
+            self.scale = (float(sx), float(sy), float(sz))
 
-    def __init__(self, name:str, parent, node=None, layer=None):
-        self.name = name
+    def __init__(self, *, parent, node=None):
+        if node:
+            self.name = node.attrib['name']
+            self.objects = {}
+            node_transform = node.find('Transform')
+            if node_transform:
+                self.transform = UDActor.Transform(**node_transform.attrib)
+            node_children = node.find('children')
+            if node_children:
+                for child in node_children:
+                    if child.tag == "Actor":
+                        UDActor(node=child, parent=self)
+                    if child.tag == "ActorMesh":
+                        UDActorMesh(node=child, parent=self)
+            parent.objects[self.name] = self
+
+
+class UDActorMesh(UDActor):
+
+    def __init__(self, *, parent, node=None):
+        super().__init__(parent=parent, node=node)
         if node:
             self.mesh = node.find('mesh').attrib['name']
-            self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('material')}
-            self.loc, self.rot, self.scale = self.transform_from_params(**node.find('Transform').attrib)
-            self.layer = node.attrib['layer']
+            self.materials = {n.attrib['id']: n.attrib['name'] for n in node.findall('material')}
 
-        parent.actors[name] = self        
-
-    def transform_from_params(self, **kwargs):
-        p = lambda name: float(kwargs[name])
-        location = (p('tx'), p('ty'), p('tz'))
-        rotation = (p('qw'), p('qx'), p('qy'), p('qz'))
-        scale = (p('sx'), p('sy'), p('sz'))
-        return (location, rotation, scale)
 
 class UDScene:
     def __init__(self, path=None, parent=None):
@@ -169,7 +175,7 @@ class UDScene:
 
         self.materials = {}
         self.meshes = {}
-        self.actors = {}
+        self.objects = {}
 
     def check_fields(self):
         pass
@@ -183,21 +189,23 @@ class UDScene:
         self.host = root.find('Host').text
         # there are other bunch of data that i'll skip for now
 
-        for mat in root.iter('Material'):
-            UDMaterial(name=mat.attrib['name'], node=mat, parent=self)
-        
-        for mat in root.iter('MasterMaterial'):
-            UDMasterMaterial(name=mat.attrib['name'], node=mat, parent=self)
-        
-        for mesh in root.iter('StaticMesh'):
-            UDMesh(xmlnode=mesh, parent=self)
+        for node in root:
+            name = node.get('name') # most relevant nodes have a name as identifier
+            if node.tag == 'Material':
+                UDMaterial(name=name, node=node, parent=self)
+            
+            if node.tag == 'MasterMaterial':
+                UDMasterMaterial(name=name, node=node, parent=self)
+            
+            if node.tag == 'StaticMesh':
+                UDMesh(xmlnode=node, parent=self)
 
-        for actor in root.iter('ActorMesh'):
-            UDActor(name=actor.attrib['name'], node=actor, parent=self)
+            if node.tag == 'Actor':
+                UDActor(node=node, parent=self)
+            if node.tag == "ActorMesh":
+                UDActorMesh(node=node, parent=self)
 
-
+        print(self.objects)
     
-    def report(self):
-        print(f'UDSCENE {self.name}')
         
  

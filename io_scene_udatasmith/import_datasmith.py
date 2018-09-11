@@ -4,6 +4,7 @@ import bpy
 import bmesh
 from .data_types import UDMesh, UDScene
 
+b_major, b_minor, b_patch = bpy.app.version
 
 def load_materials(scene:UDScene):
     ' just ensure that there are materials with the same name for now '
@@ -42,7 +43,11 @@ def load_objects(uscene: UDScene, context):
             b_object.location = uobject.loc
             b_object.rotation_quaternion = uobject.rot
             b_object.scale = uobject.scale
-            context.scene.collection.objects.link(b_object)
+            if b_minor >= 80:
+                context.scene.collection.objects.link(b_object)
+            else:
+                context.scene.objects.link(b_object)
+            
         # maybe update transform conditionally (for example if I move things in other app)
 
 

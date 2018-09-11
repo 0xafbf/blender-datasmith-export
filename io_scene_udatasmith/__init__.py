@@ -30,7 +30,6 @@ bl_info = {
     "category": "Import-Export",
 }
 
-
 # To support reload properly, try to access a package var,
 # if it's there, reload everything
 if "bpy" in locals():
@@ -56,6 +55,8 @@ from bpy_extras.io_utils import (
         path_reference_mode,
         axis_conversion,
         )
+
+b_major, b_minor, b_patch = bpy.app.version
 
 class ImportDatasmith(bpy.types.Operator, ImportHelper):
     """Load a Datasmith file"""
@@ -254,13 +255,22 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
-    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
-    bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    if b_minor >= 80:
+        bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
+        bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    else:
+        bpy.types.INFO_MT_file_export.append(menu_func_export)
+        bpy.types.INFO_MT_file_import.append(menu_func_import)
 
 
 def unregister():
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
-    bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    if b_minor >= 80:
+        bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+        bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
+    else:
+        bpy.types.INFO_MT_file_export.remove(menu_func_export)
+        bpy.types.INFO_MT_file_import.remove(menu_func_import)
+
 
     for cls in classes:
         bpy.utils.unregister_class(cls)
