@@ -62,7 +62,19 @@ class UDMesh:
         
         parent_path = os.path.dirname(os.path.abspath(self.parent.path))
         self.init_with_path(os.path.join(parent_path, self.relative_path))
-        self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('Material')}
+        # self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('Material')}
+
+        # flatten material lists
+        material_map = {int(n.attrib['id']): idx for idx, n in enumerate(node.iter('Material'),1)}
+        material_map[0] = 0
+        self.materials = {idx: n.attrib['name'] for idx, n in enumerate(node.iter('Material'),1)}
+        self.materials[0] = "Default_Material"
+        print(material_map)
+        try:
+            self.tris_material_slot = list(map(lambda x: material_map[x], self.tris_material_slot))
+        except Exception:
+            print(self.tris_material_slot)
+
 
 
     def init_with_path(self, path):
