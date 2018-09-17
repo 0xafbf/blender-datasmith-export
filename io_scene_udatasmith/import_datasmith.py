@@ -96,7 +96,8 @@ def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
             b_parent = bpy.data.objects.get(parent.name)
             if b_parent:
                 b_object.parent = b_parent
-                b_object.matrix_parent_inverse = b_object.parent.matrix_world.inverted()
+                # b_object.matrix_parent_inverse = b_object.parent.matrix_world.inverted()
+                b_object.matrix_basis = mat_compose( b_object.parent.matrix_world.inverted(), b_object.matrix_basis)
         if b_object.parent:
             b_object.matrix_world = mat_compose(parent.matrix_world, b_object.matrix_parent_inverse, b_object.matrix_basis)
         else:

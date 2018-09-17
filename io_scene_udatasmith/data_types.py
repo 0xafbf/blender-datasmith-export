@@ -65,10 +65,14 @@ class UDMesh:
         # self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('Material')}
 
         # flatten material lists
-        material_map = {int(n.attrib['id']): idx for idx, n in enumerate(node.iter('Material'),1)}
-        material_map[0] = 0
-        self.materials = {idx: n.attrib['name'] for idx, n in enumerate(node.iter('Material'),1)}
-        self.materials[0] = "Default_Material"
+        material_map = {int(n.attrib['id']): idx for idx, n in enumerate(node.iter('Material'))}
+        self.materials = {idx: n.attrib['name'] for idx, n in enumerate(node.iter('Material'))}
+        if 0 not in material_map:
+            last_index = len(material_map)
+            material_map[0] = last_index
+            self.materials[last_index] = 'default_material'
+
+        
         print(material_map)
         try:
             self.tris_material_slot = list(map(lambda x: material_map[x], self.tris_material_slot))
