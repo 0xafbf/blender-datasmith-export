@@ -55,6 +55,10 @@ def load_meshes(uscene: UDScene):
             for slot, mat in umesh.materials.items():
                 blender_mesh.materials.append(bpy.data.materials.get(mat))
 
+            uv0 = blender_mesh.uv_layers.new()
+            for idx in range(len(uv0.data)):
+                uv0.data[idx].uv = umesh.uvs[idx]
+
             
 
 
@@ -96,8 +100,20 @@ def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
             b_parent = bpy.data.objects.get(parent.name)
             if b_parent:
                 b_object.parent = b_parent
+
+                # we can do any of these three, I don't know what would be preferred.
+                
+                # this is just keeping every coordinate world space
                 # b_object.matrix_parent_inverse = b_object.parent.matrix_world.inverted()
+                
+                # this is projecting every coordinate to local space
                 b_object.matrix_basis = mat_compose( b_object.parent.matrix_world.inverted(), b_object.matrix_basis)
+                
+                # this is the other, I like it more because resetting to default is just reset transform
+                # but this would only work for objects with parent, so this is a turn down.
+                # b_object.matrix_parent_inverse = (b_object.parent.matrix_world.inverted() @ b_object.matrix_basis)
+                # b_object.matrix_basis = Matrix()
+
         if b_object.parent:
             b_object.matrix_world = mat_compose(parent.matrix_world, b_object.matrix_parent_inverse, b_object.matrix_basis)
         else:
