@@ -1,7 +1,14 @@
 import struct
 from xml.etree import ElementTree
 import os
+from os import path
 import itertools
+import bpy
+from functools import reduce
+
+import logging
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 def read_array_data(io, data_struct):
 	struct_size = struct.calcsize(data_struct)
@@ -12,14 +19,24 @@ def read_array_data(io, data_struct):
 	unpacked_data = list(struct.iter_unpack(data_struct, data))
 	return [tup[0] if len(tup) == 1 else tup for tup in unpacked_data ]
 
-def write_array_data(io, struct, data):
+
+def flatten(it):
+	data = []
+	for d in it:
+		if isinstance(d, float) or isinstance(d, int):
+			data.append(d)
+		else:
+			data += [*d]
+	return data
+
+def write_array_data(io, data_struct, data):
 	# first get data length
 	length = len(data)
-	data_struct = '<I' + (struct) * length
-	flat_data = itertools.chain(*data)
-	data = struct.pack(data_struct, *flat_data)
-	io.write(data)
-
+	data_struct = '<I' + (data_struct) * length
+	flat_data = flatten(data)
+	print(flat_data)
+	output = struct.pack(data_struct, length, *flat_data)
+	io.write(output)
 
 def read_data(io, data_struct):
 	struct_size = struct.calcsize(data_struct)
@@ -38,19 +55,67 @@ def write_null(io, num_bytes):
 	io.write(b'\0' * num_bytes)
 
 def write_string(io, string):
-	string_bytes = string.encode('utf-8') + '\0'
+	string_bytes = string.encode('utf-8') + b'\0'
 	length = len(string_bytes)
 	io.write(struct.pack('<I', length))
 	io.write(string_bytes)
 
+def sanitize_name(name):
+	return name.replace('.', '_')
+
+class UDElement:
+	"""convenience for all elements in the udatasmith file"""
+	node_type = 'Element'
+	node_group = None
+
+	class UDElementException(Exception):
+		pass
+
+	@classmethod
+	def new(cls, name, parent=None, **kwargs):
+		if parent is None:
+			raise UDElementException('Tried to create an element without a parent.')
+		if cls.node_group is None:
+			raise UDElementException("%s doesn't override `node_group`, without it, parent registration won't work.")
+		
+		group = getattr(parent, cls.node_group, {})
+
+		name = sanitize_name(name)
+
+		elem = group.get(name)
+		if elem:
+			return elem
+			
+		new_object = cls(parent=parent, name=name, **kwargs)
+		
+		if not new_object.name:
+			raise UDElementException("object created without name")
+
+		group = getattr(parent, cls.node_group, {})
+		group[new_object.name] = new_object
+		setattr(parent, cls.node_group, group)
+
+		return new_object
 
 
-class UDMesh:
+	def render(self, parent):
+		elem = ElementTree.SubElement(parent, self.node_type)
+		elem.attrib['name'] = self.name
+		return elem
 
-	def __init__(self, path=None, xmlnode:ElementTree.Element = None, parent = None):
+	def __repr__(self):
+		return '{}: {}'.format(type(self).__name__, self.name)
+
+
+class UDMesh(UDElement):
+	node_type = 'StaticMesh'
+	node_group = 'meshes'
+
+	def __init__(self, path=None, node:ElementTree.Element = None, parent = None, name=None):
 		self.parent = parent
-		if xmlnode:
-			self.init_with_xmlnode(xmlnode)
+		self.name = name
+		if node:
+			self.init_with_xmlnode(node)
 		elif path:
 			self.init_with_path(path)
 		
@@ -59,10 +124,7 @@ class UDMesh:
 
 		self.check_fields() # to test if it is possible for these fields to have different values
 
-		self.parent.meshes[self.name] = self
-
 	def init_fields(self):
-		self.name = 'udmesh_name'
 		self.source_models = 'SourceModels'
 		self.struct_property = 'StructProperty'
 		self.datasmith_mesh_source_model = 'DatasmithMeshSourceModel'
@@ -75,46 +137,12 @@ class UDMesh:
 		self.triangles = []
 		self.vertex_normals = []
 		self.uvs = []
+		self.relative_path = None
+		self.hash = ''
 
-	def fill_fields(self, bl_mesh):
-		self.init_fields() # start clean
-		import bmesh
-
-		# create copy to triangulate
-		m = bl_mesh.data.copy()
-		bm = bmesh.new()
-		bm.from_mesh(m)
-		bmesh.ops.triangulate(bm, faces=bm.faces[:])
-		# this is just to make sure a UV layer exists
-		bm.loops.layers.uv.verify()
-		bm.to_mesh(m)
-		bm.free()
-
-		# not sure if this is the best way to read normals
-		m.calc_normals_split()
-
-		self.name = bl_mesh.name # get name of the original mesh
-
-		for idx, mat in enumerate(bl_mesh.materials):
-			self.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
-
-		for p in m.polygons:
-			self.tris_material_slot.append(p.material_index)
-
-		# no smoothing groups for now
-		self.tris_smoothing_group = [0] * len(self.tris_material_slot)
-
-		for v in m.vertices:
-			self.vertices.append(v.co)
-
-		for l in m.loops:
-			self.triangles.append(l.vertex_index)
-			self.vertex_normals.append(l.normal)
-			self.uvs.append(m.uv_layers[0].data[l.index].uv)
-
-		bpy.data.meshes.remove(m)
 
 	def check_fields(self):
+		assert self.name != None
 		assert self.source_models == 'SourceModels'
 		assert self.struct_property == 'StructProperty'
 		assert self.datasmith_mesh_source_model == 'DatasmithMeshSourceModel'
@@ -124,8 +152,8 @@ class UDMesh:
 		self.label = node.attrib['label']
 		self.relative_path = node.find('file').attrib['path']
 		
-		parent_path = os.path.dirname(os.path.abspath(self.parent.path))
-		self.init_with_path(os.path.join(parent_path, self.relative_path))
+		parent_path = path.dirname(os.path.abspath(self.parent.path))
+		self.init_with_path(path.join(parent_path, self.relative_path))
 		# self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('Material')}
 
 		# flatten material lists
@@ -184,16 +212,22 @@ class UDMesh:
 		
 	def write_to_path(self, path):
 		with open(path, 'wb') as file:
-			write_null(file, 8)
+			#write_null(file, 8)
+			file.write(b'\x01\x00\x00\x00\xfd\x04\x00\x00')
 			write_string(file, self.name)
-			write_null(file, 5)
+			#write_null(file, 5)
+			file.write(b'\x00\x01\x00\x00\x00')
 			write_string(file, self.source_models)
 			write_string(file, self.struct_property)
 			write_null(file, 8)
 
 			write_string(file, self.datasmith_mesh_source_model)
 			
-			write_null(file, 49)
+			#write_null(file, 49)\
+			file.write(
+				b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+				b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6c\x04\x00\x00\x6c\x04\x00'
+				b'\x00\x7d\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00')
 
 			# further analysis revealed:
 			# this loops are per triangle
@@ -210,27 +244,91 @@ class UDMesh:
 			write_null(file, 16)
 			write_null(file, 4)
 
-class UDMaterial:
-	def __new__(cls, name: str, parent=None, **kwargs):
-		try:
-			return parent.materials[name]
-		except Exception:
-			return super().__new__(cls)
+	def render(self, parent):
+		elem = super().render(parent=parent)
+		elem.attrib['label'] = self.name
+		for idx, m in enumerate(self.materials):
+			ElementTree.SubElement(elem, 'Material', id=str(idx), name=sanitize_name(m))
+		if self.relative_path:
+			path = self.relative_path.replace('\\', '/')
+			ElementTree.SubElement(elem, 'file', path=path)
+		lm_uv = ElementTree.SubElement(elem, 'LightmapUV', value='-1')
+		ElementTree.SubElement(elem, 'Hash', value=self.hash)
+		return elem
+
+	def save(self, basedir, folder_name):
+		self.relative_path = path.join(folder_name, self.name + '.udsmesh')
+		abs_path = path.join(basedir, self.relative_path)
+		self.write_to_path(abs_path)
+		
+		import hashlib
+		hash_md5 = hashlib.md5()
+		with open(abs_path, "rb") as f:
+			for chunk in iter(lambda: f.read(4096), b""):
+				hash_md5.update(chunk)
+		self.hash = hash_md5.hexdigest()
+
+
+
+class UDMaterial(UDElement):
+	node_type = 'Material'
+	node_group = 'materials'
 
 	def __init__(self, name: str, node=None, parent=None, **kwargs):
 		self.name = name # this is like the primary identifier
 		if node:
 			self.label = node.attrib['label']
 		# datasmith file has a subnode 'shader' with some for now irrelevant info
-		if parent:
-			parent.materials[self.name] = self
 
 class UDMasterMaterial(UDMaterial):
+	class Prop:
+		prop_type = None
+		def render(self, parent, name):
+			return ElementTree.SubElement(parent, 'KeyValueProperty', name=name, type=self.prop_type, val=repr(self))
+	class PropColor(Prop):
+		prop_type = 'Color'
+		def __init__(self, r=0.0, g=0.0, b=0.0, a=1.0):
+			self.r, self.g, self.b, self.a = r, g, b, a
+		def __repr__(self):
+			return '(R={:6f},G={:6f},B={:6f},A={:6f})'.format(self.r, self.g, self.b, self.a)
+	class PropBool(Prop):
+		prop_type = 'Bool'
+		def __init__(self, b):
+			self.b = b
+		def __repr__(self):
+			return 'true' if self.b else 'false'
+
 	'''sketchup datasmith outputs Master material, it may be different'''
 	''' has params Type and Quality'''
-	pass
+	node_type = 'MasterMaterial'
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.properties = {}
 
-class UDActor:
+	def render(self, parent):
+		elem = super().render(parent)
+		elem.attrib['Type'] = '1'
+		elem.attrib['Quality'] = '0'
+		elem.attrib['label'] = self.name
+		for name, prop in self.properties.items():
+			prop.render(name=name, parent=elem)
+
+class UDTexture(UDElement):
+	node_type = 'Texture'
+	node_group = 'textures'
+
+	def render(self, parent):
+		elem = super().render(parent)
+		elem.attrib['file'] = 'path/to/file'
+		h = ElementTree.SubElement(elem, 'Hash', value="file md5 hash")
+	def save(self, basepath):
+		log.debug('saving tex {} to {}'.format(self, basepath))
+
+class UDActor(UDElement):
+
+	node_type = 'Actor'
+	node_group = 'objects'
+
 	class Transform:
 		def __init__(self, tx=0, ty=0, tz=0, 
 					 qw=0, qx=0, qy=0, qz=0,
@@ -239,11 +337,27 @@ class UDActor:
 			self.rot = (float(qw), float(qx), float(qy), float(qz))
 			self.scale = (float(sx), float(sy), float(sz))
 			# don't know what qhex is
+		def render(self, parent):
+			f = lambda n: "{:.6f}".format(n)
+			tx, ty, tz = self.loc
+			qw, qx, qy, qz = self.rot
+			sx, sy, sz = self.scale
+			return ElementTree.SubElement(parent, 'Transform',
+					tx=f(tx), ty=f(ty), tz=f(tz), 
+					qw=f(qw), qx=f(qx), qy=f(qy), qz=f(qz),
+					sx=f(sx), sy=f(sy), sz=f(sz),
+				)
 
-	def __init__(self, *, parent, node=None):
+
+
+	def __init__(self, *, parent, node=None, name=None, layer='Layer0'):
+		self.transform = UDActor.Transform()
+		self.objects = {}
+		self.name = name
+		self.layer = layer
 		if node:
 			self.name = node.attrib['name']
-			self.objects = {}
+			self.layer = node.attrib['layer']
 			node_transform = node.find('Transform')
 			if node_transform is not None:
 				self.transform = UDActor.Transform(**node_transform.attrib)
@@ -256,26 +370,127 @@ class UDActor:
 						UDActor(node=child, parent=self)
 					if child.tag == "ActorMesh":
 						UDActorMesh(node=child, parent=self)
-			parent.objects[self.name] = self
+
+	def render(self, parent):
+		elem = super().render(parent)
+		elem.attrib['layer'] = self.layer
+		self.transform.render(elem)
+
+		if len(self.objects) > 0:
+			children = ElementTree.SubElement(elem, 'children')
+			for name, child in self.objects.items():
+				child.render(children)
+
+		return elem
 
 
 class UDActorMesh(UDActor):
 
-	def __init__(self, *, parent, node=None):
-		super().__init__(parent=parent, node=node)
+	node_type = 'ActorMesh'
+
+	def __init__(self, *, parent, node=None, name=None):
+		super().__init__(parent=parent, node=node, name=name)
 		if node:
 			self.mesh = node.find('mesh').attrib['name']
 			self.materials = {n.attrib['id']: n.attrib['name'] for n in node.findall('material')}
 
+	def render(self, parent):
+		elem = super().render(parent)
+		mesh = ElementTree.SubElement(elem, 'mesh')
+		mesh.attrib['name'] = sanitize_name(self.mesh)
+		
 
-class UDScene:
+class UDActorLight(UDActor):
+
+	node_type = 'Light'
+
+	LIGHT_POINT = 'PointLight'
+	LIGHT_SPOT = 'SpotLight'
+
+	LIGHT_UNIT_CANDELAS = 'Candelas'
+
+	def __init__(self, *, parent, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
+		super().__init__(parent=parent, node=node, name=name)
+		self.type = light_type
+		self.intensity = 1500
+		self.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
+		self.color = color
+		self.inner_cone_angle = 22.5
+		self.outer_cone_angle = 25
+		self.post = []
+		if node:
+			self.parse(node)
+	def parse(self, node):
+		self.type = node.attrib['type']
+
+		# self.intensity =       	node.find('Intensity').attrib['value']
+		# self.intensity_units = 	node.find('IntensityUnits').attrib['value']
+		# self.color =           	node.find('Color').attrib['value']
+		# self.inner_cone_angle =	node.find('InnerConeAngle').attrib['value']
+		# self.outer_cone_angle =	node.find('OuterConeAngle').attrib['value']
+
+	def render(self, parent):
+		elem = super().render(parent)
+		elem.attrib['type'] = self.type
+		elem.attrib['enabled'] = '1'
+		ElementTree.SubElement(elem, 'Intensity',     	value='{:6f}'.format(self.intensity))
+		ElementTree.SubElement(elem, 'IntensityUnits',	value=self.intensity_units)
+		f= '{:6f}'
+		ElementTree.SubElement(	elem, 'Color', usetemp='0', temperature='6500.0',
+		                       	R=f.format(self.color[0]),
+		                       	G=f.format(self.color[1]),
+		                       	B=f.format(self.color[2]),
+		)
+		if self.type == UDActorLight.LIGHT_SPOT:
+			ElementTree.SubElement(elem, 'InnerConeAngle',	value='{:6f}'.format(self.inner_cone_angle))
+			ElementTree.SubElement(elem, 'OuterConeAngle',	value='{:6f}'.format(self.outer_cone_angle))
+		return elem
+
+
+class UDActorCamera(UDActor):
+
+	node_type = 'Camera'
+
+	def __init__(self, *, parent, node=None, name=None):
+		super().__init__(parent=parent, node=node, name=name)
+		self.sensor_width = 36.0
+		self.sensor_aspect_ratio = 1.777778
+		self.focus_distance = 1000.0
+		self.f_stop = 5.6
+		self.focal_length = 32.0
+		self.post = []
+		if node:
+			self.parse(node)
+
+	def parse(self, node):
+		self.sensor_width =       	node.find('SensorWidth').attrib['value']
+		self.sensor_aspect_ratio =	node.find('SensorAspectRatio').attrib['value']
+		self.focus_distance =     	node.find('FocusDistance').attrib['value']
+		self.f_stop =             	node.find('FStop').attrib['value']
+		self.focal_length =       	node.find('FocalLength').attrib['value']
+
+	def render(self, parent):
+		elem = super().render(parent)
+		ElementTree.SubElement(elem, 'SensorWidth',      	value='{:6f}'.format(self.sensor_width))
+		ElementTree.SubElement(elem, 'SensorAspectRatio',	value='{:6f}'.format(self.sensor_aspect_ratio))
+		ElementTree.SubElement(elem, 'FocusDistance',    	value='{:6f}'.format(self.focus_distance))
+		ElementTree.SubElement(elem, 'FStop',            	value='{:6f}'.format(self.f_stop))
+		ElementTree.SubElement(elem, 'FocalLength',      	value='{:6f}'.format(self.focal_length))
+		ElementTree.SubElement(elem, 'Post')
+		return elem
+
+
+
+
+class UDScene(UDElement):
+
+	node_type = 'DatasmithUnrealScene'
+
 	def __init__(self, source=None):
 		self.init_fields()
 		if type(source) is str:
 			self.path = source
 			self.init_with_path(self.path)
-		elif source is not None:
-			self.init_with_blend_scene(source)
 
 		self.check_fields() # to test if it is possible for these fields to have different values
 
@@ -285,11 +500,13 @@ class UDScene:
 		self.materials = {}
 		self.meshes = {}
 		self.objects = {}
+		self.textures = {}
 
 	def check_fields(self):
 		pass
 
 	def init_with_path(self, path):
+
 		tree = ElementTree.parse(path)
 		root = tree.getroot()
 
@@ -298,23 +515,72 @@ class UDScene:
 		self.host = root.find('Host').text
 		# there are other bunch of data that i'll skip for now
 
+		classes = [
+			UDMaterial,
+			UDMasterMaterial,
+			UDMesh,
+			UDActor,
+			UDActorMesh,
+			UDActorCamera,
+			UDActorLight,
+		]
+
+		mappings = {cls.node_type:cls for cls in classes} 
+
 		for node in root:
 			name = node.get('name') # most relevant nodes have a name as identifier
-			if node.tag == 'Material':
-				UDMaterial(name=name, node=node, parent=self)
-			
-			if node.tag == 'MasterMaterial':
-				UDMasterMaterial(name=name, node=node, parent=self)
-			
-			if node.tag == 'StaticMesh':
-				UDMesh(xmlnode=node, parent=self)
+			cls = mappings.get(node.tag)
+			if cls:
+				cls.new(parent=self, name=name, node=node)
 
-			if node.tag == 'Actor':
-				UDActor(node=node, parent=self)
-			if node.tag == "ActorMesh":
-				UDActorMesh(node=node, parent=self)
+	def render(self):
+		tree = ElementTree.Element('DatasmithUnrealScene')
 
-		print(self.objects)
+		version = ElementTree.SubElement(tree, 'Version')
+		version.text = '0.20' # to get from context?
 
-	def init_with_blend_scene(self, scene):
-		pass
+		sdk = ElementTree.SubElement(tree, 'SDKVersion')
+		sdk.text = '4.20E1' # to get from context?
+
+		host = ElementTree.SubElement(tree, 'Host')
+		host.text = 'Blender'
+
+		application = ElementTree.SubElement(tree, 'Application', Vendor='Blender', ProductName='Blender', ProductVersion='2.80')
+		user = ElementTree.SubElement(tree, 'User', ID='00000000000000000000000000000000', OS='Windows 8.1')
+
+		for name, obj in self.objects.items():
+			obj.render(tree)
+		for name, mesh in self.meshes.items():
+			mesh.render(tree)
+		for name, mat in self.materials.items():
+			mat.render(tree)
+		for name, tex in self.textures.items():
+			tex.render(tree)
+
+		return tree
+
+	def save(self, basedir, name):
+		self.name = name
+
+		folder_name = name + '_Assets'
+		# make sure basepath_Assets directory exists
+		try:
+			os.makedirs(path.join(basedir, folder_name))
+		except FileExistsError as e:
+			pass
+
+		for _name, mesh in self.meshes.items():
+			mesh.save(basedir, folder_name)
+		for _name, tex in self.textures.items():
+			tex.save(basedir, folder_name)
+		
+		tree = self.render()
+		txt = ElementTree.tostring(tree)
+		from xml.dom import minidom
+		pretty_xml = minidom.parseString(txt).toprettyxml()
+
+		filename = path.join(basedir, self.name + '.udatasmith')
+
+		with open(filename, 'w') as f:
+			f.write(pretty_xml)
+	
