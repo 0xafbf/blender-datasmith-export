@@ -30,6 +30,10 @@ bl_info = {
     "category": "Import-Export",
 }
 
+import logging
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
+
 # To support reload properly, try to access a package var,
 # if it's there, reload everything
 if "bpy" in locals():
@@ -55,6 +59,7 @@ from bpy_extras.io_utils import (
         path_reference_mode,
         axis_conversion,
         )
+
 
 b_major, b_minor, b_patch = bpy.app.version
 
@@ -93,8 +98,8 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
     bl_label = "Export Datasmith"
     bl_options = {'UNDO', 'PRESET'}
 
-    filename_ext = ".datasmith"
-    filter_glob = StringProperty(default="*.datasmith", options={'HIDDEN'})
+    filename_ext = ".udatasmith"
+    filter_glob = StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
     # List of operator properties, the attributes will be assigned
     # to the class instance from the operator settings before calling.
@@ -214,30 +219,9 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
         return self.batch_mode == 'OFF'
 
     def execute(self, context):
-        '''from mathutils import Matrix
-        if not self.filepath:
-            raise Exception("filepath not set")
-
-        global_matrix = (axis_conversion(to_forward=self.axis_forward,
-                                         to_up=self.axis_up,
-                                         ).to_4x4())
-
-        keywords = self.as_keywords(ignore=("check_existing",
-                                            "filter_glob",
-                                            "ui_tab",
-                                            ))
-
-        keywords["global_matrix"] = global_matrix
-
-        if self.version == 'BIN7400':
-            from . import export_datasmith_bin
-            return export_datasmith_bin.save(self, context, **keywords)
-        else:
-            from . import export_datasmith
-            return export_datasmith.save(self, context, **keywords)'''
-        print('exported a datasmith file')
-        return {'FINISHED'}
-
+        keywords = self.as_keywords(ignore=("filter_glob",))
+        from . import export_datasmith
+        return export_datasmith.save(self, context, **keywords)
 
 def menu_func_export(self, context):
     self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.udatasmith)")

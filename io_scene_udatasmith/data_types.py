@@ -34,7 +34,6 @@ def write_array_data(io, data_struct, data):
 	length = len(data)
 	data_struct = '<I' + (data_struct) * length
 	flat_data = flatten(data)
-	print(flat_data)
 	output = struct.pack(data_struct, length, *flat_data)
 	io.write(output)
 
@@ -44,6 +43,11 @@ def read_data(io, data_struct):
 	data = io.read(struct_size)
 	unpacked_data = struct.unpack(data_struct, data)
 	return unpacked_data
+
+def write_data(io, data_struct, *args):
+	data_struct = '<' + data_struct
+	packed = struct.pack(data_struct, *args)
+	io.write(packed)
 
 def read_string(io):
 	count = struct.unpack("<I", io.read(4))[0]
@@ -164,17 +168,17 @@ class UDMesh(UDElement):
 			material_map[0] = last_index
 			self.materials[last_index] = 'default_material'
 
-		print(material_map)
-		try:
-			self.tris_material_slot = list(map(lambda x: material_map[x], self.tris_material_slot))
-		except Exception:
-			print(self.tris_material_slot)
+		self.tris_material_slot = list(map(lambda x: material_map.get(x, 0), self.tris_material_slot))
 
 
 	def init_with_path(self, path):
 		with open(path, 'rb') as file:
 
-			self.a01 = read_data(file, 'II') # 8 bytes
+
+			# this may need some work, found some documentation:
+			# Engine/Source/Developer/Rawmesh
+
+			self.a01 = read_data(file, 'II') # a 1 and the whole bytes size
 			self.name = read_string(file)
 
 			self.a02 = file.read(5)
@@ -185,25 +189,35 @@ class UDMesh(UDElement):
 
 			self.datasmith_mesh_source_model = read_string(file)
 			
-			self.a04 = file.read(49)
+			self.a04 = file.read(25) # just zeros
 
-			self.tris_material_slot = read_array_data(file, "I")
-			self.tris_smoothing_group = read_array_data(file, "I")
-			
-			self.vertices = read_array_data(file, "fff")
-			self.triangles = read_array_data(file, "I")
-			
-			self.a05 = read_array_data(file, "I") # 4 bytes, not sure about this structure
-			self.a06 = read_array_data(file, "I") # 4 bytes, not sure about this structure
+			self.payload_length = read_data(file, 'II') # this is the size of the rawmesh
 
-			self.vertex_normals = read_array_data(file, "fff")
-			self.uvs = read_array_data(file, "ff")
+			self.a04_b = file.read(8) # this is a 125 and a zero, no idea what it is
+
+			self.raw_mesh_version = read_data(file, 'i') # always 1 for what I can see
+			self.raw_mesh_lic_version = read_data(file, 'i') # always 0 for what I can see
+
+			self.tris_material_slot = read_array_data(file, "I") #FaceMaterialIndices
+			self.tris_smoothing_group = read_array_data(file, "I") #FaceSmoothingMasks
 			
-			self.a07 = file.read(36) # hmmm
+			self.vertices = read_array_data(file, "fff") #VertexPositions
+			self.triangles = read_array_data(file, "I") #WedgeIndices
 			
-			self.checksum = file.read(16) # I guess... seems to be non deterministic
+			self.a05 = read_array_data(file, "I") # WedgeTangentX (maybe)
+			self.a06 = read_array_data(file, "I") # WedgeTangentY (maybe)
+
+			self.vertex_normals = read_array_data(file, "fff") #WedgeTangentZ
+			self.uvs = read_array_data(file, "ff") #WedgeTexCoords
+
+			self.a07 = file.read(28) # these may be WedgeTexCoods[1,2...7]
+			# ue4 defines 8 texcoord layers, here we read the other seven zeros
+			self.a07_b = file.read(4) # these seem to be WedgeColors count
+			self.a07_c = file.read(4) # MaterialIndexToImportIndex?
+
+			self.checksum = file.read(16) # I guess this is Guid?
 			
-			self.a08 = file.read() #4 bytes more
+			self.a08 = file.read() # And maybe this is bGuidIsHash
 			
 			# small check here to crash if something is suspicious
 			assert len(self.triangles) == len(self.uvs)
@@ -214,6 +228,8 @@ class UDMesh(UDElement):
 		with open(path, 'wb') as file:
 			#write_null(file, 8)
 			file.write(b'\x01\x00\x00\x00\xfd\x04\x00\x00')
+
+			file_start = file.tell()
 			write_string(file, self.name)
 			#write_null(file, 5)
 			file.write(b'\x00\x01\x00\x00\x00')
@@ -223,11 +239,17 @@ class UDMesh(UDElement):
 
 			write_string(file, self.datasmith_mesh_source_model)
 			
-			#write_null(file, 49)\
-			file.write(
-				b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-				b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x6c\x04\x00\x00\x6c\x04\x00'
-				b'\x00\x7d\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00\x00')
+			write_null(file, 25)
+
+			size_loc = file.tell() # here we have to write the rawmesh size two times
+			write_data(file, 'II', 0, 0) # just some placeholder data, to rewrite at the end
+
+			file.write(b'\x7d\x00\x00\x00\x00\x00\x00\x00') #125 and zero
+
+			#here starts rawmesh
+			mesh_start = file.tell()
+			file.write(b'\x01\x00\x00\x00') # raw mesh version
+			file.write(b'\x00\x00\x00\x00') # raw mesh lic  version
 
 			# further analysis revealed:
 			# this loops are per triangle
@@ -241,8 +263,20 @@ class UDMesh(UDElement):
 			write_array_data(file, 'fff', self.vertex_normals)
 			write_array_data(file, 'ff', self.uvs)
 			write_null(file, 36)
+			
+			#here ends rawmesh
+			mesh_end = file.tell()
+
 			write_null(file, 16)
 			write_null(file, 4)
+			file_end = file.tell()
+
+			mesh_size = mesh_end-mesh_start
+			file.seek(size_loc)
+			write_data(file, 'II', mesh_size, mesh_size)
+
+			file.seek(0)
+			write_data(file, 'II', 1, file_end - file_start)
 
 	def render(self, parent):
 		elem = super().render(parent=parent)

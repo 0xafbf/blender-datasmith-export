@@ -24,11 +24,13 @@ matrix_forward = Matrix((
 
 def collect_materials(materials, uscene):
 	for mat in materials:
-		if mat.name in uscene.materials:
+		mat_name = getattr(mat, 'name', 'default_material')
+		if mat_name in uscene.materials:
 			continue
 
-		umat = UDMasterMaterial.new(parent=uscene, name=mat.name)
-		umat.properties['Color'] = UDMasterMaterial.PropColor(*mat.diffuse_color)
+		umat = UDMasterMaterial.new(parent=uscene, name=mat_name)
+		if mat:
+			umat.properties['Color'] = UDMasterMaterial.PropColor(*mat.diffuse_color)
 
 
 def collect_mesh(bl_mesh, uscene):
