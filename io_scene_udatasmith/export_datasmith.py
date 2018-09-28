@@ -67,7 +67,7 @@ def collect_mesh(bl_mesh, uscene):
 	
 	bpy.data.meshes.remove(m) 
 
-def collect_object(bl_obj, uscene, parent = None):
+def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, name_override=None):
 	if parent is None:
 		parent = uscene
 	uobj = None
@@ -75,11 +75,17 @@ def collect_object(bl_obj, uscene, parent = None):
 	kwargs = {}
 	kwargs['parent'] = parent
 	kwargs['name'] = bl_obj.name
+	if name_override:
+		kwargs['name'] = name_override
 	
 	if bl_obj.type == 'MESH':
-		uobj = UDActorMesh.new(**kwargs)
-		collect_mesh(bl_obj.data, uscene)
-		uobj.mesh = bl_obj.data.name
+		bl_mesh = bl_obj.data
+		if len(bl_mesh.polygons) > 0:
+			uobj = UDActorMesh.new(**kwargs)
+			collect_mesh(bl_obj.data, uscene)
+			uobj.mesh = bl_obj.data.name
+		else: # if is a mesh with no polys, treat as empty
+			uobj = UDActor.new(**kwargs)
 	elif bl_obj.type == 'CAMERA':
 		uobj = UDActorCamera.new(**kwargs)
 		bl_cam = bl_obj.data
@@ -93,7 +99,7 @@ def collect_object(bl_obj, uscene, parent = None):
 
 		node = bl_light.node_tree.nodes['Emission']
 		uobj.color = node.inputs['Color'].default_value
-		uobj.intensity = node.inputs['Strength'].default_value * 16 # rough translation to candelas
+		uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
 
 		if bl_light.type == 'POINT':
 			uobj.type = UDActorLight.LIGHT_POINT
@@ -106,17 +112,31 @@ def collect_object(bl_obj, uscene, parent = None):
 	else: # maybe empties
 		uobj = UDActor.new(**kwargs)
 
-	obj_mat = matrix_datasmith * bl_obj.matrix_world * matrix_datasmith.inverted()
+	mat_basis = bl_obj.matrix_world
+	if dupli_matrix:
+		mat_basis = dupli_matrix
+
+	obj_mat = matrix_datasmith * mat_basis * matrix_datasmith.inverted()
 
 	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LAMP':
+		# use this correction because lights/cameras in blender point -Z
 		obj_mat = obj_mat * matrix_forward
 
 	uobj.transform.loc = obj_mat.to_translation()
 	uobj.transform.rot = obj_mat.to_quaternion()
 	uobj.transform.scale = obj_mat.to_scale()
 	
-	for child in bl_obj.children:
-		collect_object(child, uscene, uobj)
+	if bl_obj.dupli_type != 'NONE':
+		bl_obj.dupli_list_create(context.scene)
+		duplis = bl_obj.dupli_list
+		for idx, dup in enumerate(duplis):
+			dupli_name = '{parent}_{dup_idx}'.format(parent=bl_obj.name, dup_idx=idx)
+			collect_object(dup.object, uscene, parent=uobj, context=context, dupli_matrix=dup.matrix, name_override=dupli_name)
+		bl_obj.dupli_list_clear()
+
+	if dupli_matrix is None:
+		for child in bl_obj.children:
+			collect_object(child, uscene, parent=uobj, context=context)
 
 def collect_to_uscene(context):
 	all_objects = context.scene.objects
@@ -124,7 +144,7 @@ def collect_to_uscene(context):
 	
 	uscene = UDScene()
 	for obj in root_objects:
-		uobj = collect_object(obj, uscene)
+		uobj = collect_object(obj, uscene, context=context)
 	
 	return uscene
 
