@@ -317,27 +317,54 @@ class UDMaterial(UDElement):
 class UDMasterMaterial(UDMaterial):
 	class Prop:
 		prop_type = None
+		def __init__(self, value):
+			self.value = value
 		def render(self, parent, name):
 			return ElementTree.SubElement(parent, 'KeyValueProperty', name=name, type=self.prop_type, val=repr(self))
+		def __repr__(self):
+			return repr(self.value)
 	class PropColor(Prop):
 		prop_type = 'Color'
-		def __init__(self, r=0.0, g=0.0, b=0.0, a=1.0):
-			self.r, self.g, self.b, self.a = r, g, b, a
+		def __init__(self, value):
+			self.parse(value) if type(value) == str else super().__init__(value)
+		def parse(self, src):
+			import re
+			self.value = tuple(map(float, re.match(r"\(R=(-?[\d.]*),G=(-?[\d.]*),B=(-?[\d.]*),A=(-?[\d.]*)\)", src).groups()))
 		def __repr__(self):
-			return '(R={:6f},G={:6f},B={:6f},A={:6f})'.format(self.r, self.g, self.b, self.a)
+			r, g, b, a = self.value
+			return '(R={:6f},G={:6f},B={:6f},A={:6f})'.format(r, g, b, a)
 	class PropBool(Prop):
 		prop_type = 'Bool'
-		def __init__(self, b):
-			self.b = b
+		def __init__(self, value):
+			self.value = value
+			if type(value) is str:
+				self.value = True if value == 'true' else False
 		def __repr__(self):
 			return 'true' if self.b else 'false'
+	class PropTexture(Prop):
+		prop_type = 'Texture'
+	class PropFloat(Prop):
+		prop_type = 'Float'
+		def __init__(self, value):
+			self.value = value
+			if type(value) is str:
+				self.value = float(value)
+
+	types = {
+		"Color": PropColor,
+		"Bool": PropBool,
+		"Texture":PropTexture,
+		"Float": PropFloat,
+	}
 
 	'''sketchup datasmith outputs Master material, it may be different'''
 	''' has params Type and Quality'''
 	node_type = 'MasterMaterial'
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
+	def __init__(self, *args, node, **kwargs):
+		super().__init__(*args, node=node, **kwargs)
 		self.properties = {}
+		for prop in node.findall('KeyValueProperty'):
+			self.properties[prop.attrib['name']] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
 
 	def render(self, parent):
 		elem = super().render(parent)
@@ -350,6 +377,50 @@ class UDMasterMaterial(UDMaterial):
 class UDTexture(UDElement):
 	node_type = 'Texture'
 	node_group = 'textures'
+
+	@staticmethod
+	def find(*, name, parent):
+		for tex in parent.textures.values():
+			if tex.file == name: 
+				return tex
+
+	@classmethod
+	def new(cls, name, parent=None, node=None,**kwargs):
+	# Need to override as it is possible to have textures with the same
+	# but different path
+		if node is None:
+			return super().new(name=name, parent=parent, **kwargs)
+		if parent is None:
+			raise UDElementException('Tried to create an element without a parent.')
+		folder, file = path.split(node.attrib['file'])
+		existing = UDTexture.find(parent=parent, name=file)
+		if existing: # existing texture with path
+			return existing
+
+		name = sanitize_name(name)
+		elem = parent.textures.get(name)
+		if elem: # exists texture with name but other path
+			name = '{}_1'.format(name) 
+			
+		new_object = cls(parent=parent, name=name, node=node, **kwargs)
+		
+		if not new_object.name:
+			raise UDElementException("object created without name")
+
+		textures = getattr(parent, 'textures', {})
+		textures[name] = new_object
+		parent.textures = textures
+		return new_object
+
+	def __init__(self, *, parent, node=None, name=None):
+		self.name = name
+		self.parent = parent
+		if node:
+			self.folder, self.file = path.split(node.attrib['file'])
+			self.texturemode = node.attrib['texturemode']
+
+	def abs_path(self):
+		return path.join(path.dirname(self.parent.path), self.folder, self.file)
 
 	def render(self, parent):
 		elem = super().render(parent)
@@ -398,12 +469,13 @@ class UDActor(UDElement):
 			else:
 				import pdb; pdb.set_trace()
 			node_children = node.find('children')
-			if node_children:
+			if node_children is not None:
 				for child in node_children:
+					name = child.attrib["name"]
 					if child.tag == "Actor":
-						UDActor(node=child, parent=self)
+						UDActor.new(name=name, node=child, parent=self)
 					if child.tag == "ActorMesh":
-						UDActorMesh(node=child, parent=self)
+						UDActorMesh.new(name=name, node=child, parent=self)
 
 	def render(self, parent):
 		elem = super().render(parent)
@@ -550,6 +622,7 @@ class UDScene(UDElement):
 		# there are other bunch of data that i'll skip for now
 
 		classes = [
+			UDTexture,
 			UDMaterial,
 			UDMasterMaterial,
 			UDMesh,
@@ -566,6 +639,8 @@ class UDScene(UDElement):
 			cls = mappings.get(node.tag)
 			if cls:
 				cls.new(parent=self, name=name, node=node)
+
+		print("loaded")
 
 	def render(self):
 		tree = ElementTree.Element('DatasmithUnrealScene')

@@ -55,7 +55,6 @@ from bpy.props import (
 from bpy_extras.io_utils import (
         ImportHelper,
         ExportHelper,
-        orientation_helper_factory,
         path_reference_mode,
         axis_conversion,
         )

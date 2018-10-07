@@ -4,7 +4,7 @@ import bpy
 import bmesh
 from mathutils import Matrix, Vector
 
-from .data_types import UDMesh, UDScene, UDActor
+from .data_types import UDMesh, UDScene, UDActor, UDTexture
 
 b_major, b_minor, b_patch = bpy.app.version
 
@@ -27,11 +27,24 @@ def mat_compose(a, b, *args):
 
 def load_materials(scene:UDScene):
     ' just ensure that there are materials with the same name for now '
-    for name, mat in scene.materials.items():
+    for name, umat in scene.materials.items():
         blender_mat = bpy.data.materials.get(name)
         if not blender_mat:
             blender_mat = bpy.data.materials.new(name)
-        
+            if "Color" in umat.properties:
+                blender_mat.diffuse_color = umat.properties['Color'].value[:3]
+            if "Texture" in umat.properties:
+                img_name = umat.properties['Texture'].value
+                blender_mat.use_nodes = True
+                image_node = blender_mat.node_tree.nodes.new('ShaderNodeTexImage')
+                utex = UDTexture.find(name=img_name, parent=scene)
+                im = bpy.data.images.load(utex.abs_path())
+                image_node.image = im
+
+                shader_node = blender_mat.node_tree.nodes[1]
+                blender_mat.node_tree.links.new(image_node.outputs['Color'], shader_node.inputs['Base Color'])
+
+
         # here maybe something like mat.populate(blender_mat) ?
 
 
@@ -55,7 +68,11 @@ def load_meshes(uscene: UDScene):
             for slot, mat in umesh.materials.items():
                 blender_mesh.materials.append(bpy.data.materials.get(mat))
 
-            uv0 = blender_mesh.uv_layers.new()
+            if b_minor >= 80:
+                blender_mesh.uv_layers.new()
+            else:
+                blender_mesh.uv_textures.new()
+            uv0 = blender_mesh.uv_layers[0]
             for idx in range(len(uv0.data)):
                 uv0.data[idx].uv = umesh.uvs[idx]
 
@@ -68,6 +85,7 @@ def load_meshes(uscene: UDScene):
 
 def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
     b_object = bpy.data.objects.get(name)
+    print("loading: ", name)
     if not b_object:
         mesh_name = getattr(actor, 'mesh', None) # is not valid in plain actors
         b_mesh = None
@@ -132,8 +150,8 @@ def load_objects(uscene: UDScene, context):
         # maybe update transform conditionally (for example if I move things in other app)
 
 
-def load(operator, context, filepath, *, use_smooth_groups = False):
-    scene = UDScene(path=filepath)
+def load(operator, context, filepath, *, use_smooth_groups = False, **kwargs):
+    scene = UDScene(source=filepath)
     load_materials(scene)
     load_meshes(scene)
     load_objects(scene, context=context)

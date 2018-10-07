@@ -30,7 +30,7 @@ def collect_materials(materials, uscene):
 
 		umat = UDMasterMaterial.new(parent=uscene, name=mat_name)
 		if mat:
-			umat.properties['Color'] = UDMasterMaterial.PropColor(*mat.diffuse_color)
+			umat.properties['Color'] = UDMasterMaterial.PropColor(mat.diffuse_color)
 
 
 def collect_mesh(bl_mesh, uscene):
