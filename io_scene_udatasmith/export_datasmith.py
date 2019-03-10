@@ -27,6 +27,13 @@ def collect_materials(materials, uscene):
 		mat_name = getattr(mat, 'name', 'default_material')
 		if mat_name in uscene.materials:
 			continue
+		output = mat.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
+        surface_input = output.inputs['Surface']
+        if surface_input.links:
+                surface = surface_input.links[0].from_node
+
+
+        displacement = outputs.inputs['Displacement']
 
 		umat = UDMasterMaterial.new(parent=uscene, name=mat_name)
 		if mat:
@@ -34,8 +41,21 @@ def collect_materials(materials, uscene):
 
 
 def collect_mesh(bl_mesh, uscene):
-	umesh = UDMesh.new(name=bl_mesh.name, parent=uscene)
-	
+
+	# when using linked libraries, some meshes can have the same name
+	mesh_name = bl_mesh.name
+	if bl_mesh.library:
+		#import pdb; pdb.set_trace()
+		lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
+		prefix = lib_path.strip('_')
+		if prefix.endswith('_blend'):
+			prefix = prefix[:-6] + '_'
+		mesh_name = prefix + mesh_name
+
+	umesh = UDMesh.new(name=mesh_name, parent=uscene)
+	if len(umesh.vertices) > 0:
+		# mesh already processed
+		return umesh
 	# create copy to triangulate
 	m = bl_mesh.copy()
 	m.transform(matrix_datasmith)
@@ -62,10 +82,11 @@ def collect_mesh(bl_mesh, uscene):
 	umesh.vertices = [v.co.copy() for v in m.vertices]
 	
 	umesh.triangles = [l.vertex_index for l in m.loops]
-	umesh.vertex_normals = [matrix_normals * l.normal for l in m.loops] # don't know why, but copy is needed for this only
+	umesh.vertex_normals = [matrix_normals @ l.normal for l in m.loops] # don't know why, but copy is needed for this only
 	umesh.uvs = [m.uv_layers[0].data[l.index].uv.copy() for l in m.loops]
 	
 	bpy.data.meshes.remove(m) 
+	return umesh
 
 def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, name_override=None):
 	if parent is None:
@@ -82,8 +103,13 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
 			uobj = UDActorMesh.new(**kwargs)
-			collect_mesh(bl_obj.data, uscene)
-			uobj.mesh = bl_obj.data.name
+			umesh = collect_mesh(bl_obj.data, uscene)
+			uobj.mesh = umesh.name
+                        for idx, slot in enumerate(bl_obj.material_slots):
+                                if slot.link == 'OBJECT':
+                                        collect_materials([slot.material], uscene)
+                                        uobj.materials[idx] = slot.material.name
+                                        
 		else: # if is a mesh with no polys, treat as empty
 			uobj = UDActor.new(**kwargs)
 	elif bl_obj.type == 'CAMERA':
@@ -114,27 +140,26 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 
 	mat_basis = bl_obj.matrix_world
 	if dupli_matrix:
-		mat_basis = dupli_matrix
+		mat_basis = dupli_matrix @ mat_basis
 
-	obj_mat = matrix_datasmith * mat_basis * matrix_datasmith.inverted()
+	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
 	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LAMP':
 		# use this correction because lights/cameras in blender point -Z
-		obj_mat = obj_mat * matrix_forward
+		obj_mat = obj_mat @ matrix_forward
 
-	uobj.transform.loc = obj_mat.to_translation()
-	uobj.transform.rot = obj_mat.to_quaternion()
-	uobj.transform.scale = obj_mat.to_scale()
+	loc, rot, scale = obj_mat.decompose()
+	uobj.transform.loc = loc
+	uobj.transform.rot = rot
+	uobj.transform.scale = scale
 	
-	if bl_obj.dupli_type != 'NONE':
-		bl_obj.dupli_list_create(context.scene)
-		duplis = bl_obj.dupli_list
+	if bl_obj.dupli_type == 'COLLECTION':
+		duplis = bl_obj.dupli_group.objects
 		for idx, dup in enumerate(duplis):
-			dupli_name = '{parent}_{dup_idx}'.format(parent=bl_obj.name, dup_idx=idx)
-			collect_object(dup.object, uscene, parent=uobj, context=context, dupli_matrix=dup.matrix, name_override=dupli_name)
-		bl_obj.dupli_list_clear()
+			dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
+			collect_object(dup, uscene, parent=uobj, context=context, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
 
-	if dupli_matrix is None:
+	if dupli_matrix is None: # this was for blender 2.7, maybe 2.8 works without this
 		for child in bl_obj.children:
 			collect_object(child, uscene, parent=uobj, context=context)
 

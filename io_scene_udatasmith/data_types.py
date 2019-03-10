@@ -331,7 +331,7 @@ class UDMasterMaterial(UDMaterial):
 			import re
 			self.value = tuple(map(float, re.match(r"\(R=(-?[\d.]*),G=(-?[\d.]*),B=(-?[\d.]*),A=(-?[\d.]*)\)", src).groups()))
 		def __repr__(self):
-			r, g, b, a = self.value
+			r, g, b, a = (1.0,1.0,1.0,1.0)
 			return '(R={:6f},G={:6f},B={:6f},A={:6f})'.format(r, g, b, a)
 	class PropBool(Prop):
 		prop_type = 'Bool'
@@ -360,11 +360,12 @@ class UDMasterMaterial(UDMaterial):
 	'''sketchup datasmith outputs Master material, it may be different'''
 	''' has params Type and Quality'''
 	node_type = 'MasterMaterial'
-	def __init__(self, *args, node, **kwargs):
+	def __init__(self, *args, node=None, **kwargs):
 		super().__init__(*args, node=node, **kwargs)
 		self.properties = {}
-		for prop in node.findall('KeyValueProperty'):
-			self.properties[prop.attrib['name']] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
+		if node is not None:
+			for prop in node.findall('KeyValueProperty'):
+				self.properties[prop.attrib['name']] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
 
 	def render(self, parent):
 		elem = super().render(parent)
@@ -455,9 +456,10 @@ class UDActor(UDElement):
 
 
 
-	def __init__(self, *, parent, node=None, name=None, layer='Layer0'):
+	def __init__(self, *, parent, node=None, name=None, layer='Default'):
 		self.transform = UDActor.Transform()
 		self.objects = {}
+                self.materials = {}
 		self.name = name
 		self.layer = layer
 		if node:

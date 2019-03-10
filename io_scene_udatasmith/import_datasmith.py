@@ -108,11 +108,11 @@ def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
 
         b_object.matrix_basis = mat_compose(matrix_datasmith, b_object.matrix_basis, matrix_datasmith.inverted())
 
-        if b_minor >= 80:
-            context.scene.collection.objects.link(b_object)
-            # maybe in the future it would be good to use collections instead of empties?
-        else:
-            context.scene.objects.link(b_object)
+        collection = bpy.data.collections.get(actor.layer)
+        if collection is None:
+            collection = bpy.data.collections.new(actor.layer)
+            context.scene.collection.children.link(collection)
+        collection.objects.link(b_object)
 
         if parent:
             b_parent = bpy.data.objects.get(parent.name)
@@ -122,10 +122,10 @@ def load_actor(context, name: str, actor:UDActor, parent:UDActor = None):
                 # we can do any of these three, I don't know what would be preferred.
                 
                 # this is just keeping every coordinate world space
-                # b_object.matrix_parent_inverse = b_object.parent.matrix_world.inverted()
+                b_object.matrix_parent_inverse = b_object.parent.matrix_world.inverted()
                 
                 # this is projecting every coordinate to local space
-                b_object.matrix_basis = mat_compose( b_object.parent.matrix_world.inverted(), b_object.matrix_basis)
+                #b_object.matrix_basis = mat_compose( b_object.parent.matrix_world.inverted(), b_object.matrix_basis)
                 
                 # this is the other, I like it more because resetting to default is just reset transform
                 # but this would only work for objects with parent, so this is a turn down.
