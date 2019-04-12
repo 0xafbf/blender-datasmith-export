@@ -4,8 +4,12 @@ import bmesh
 import math
 from io_scene_udatasmith.data_types import (
 	UDScene, UDActor, UDActorMesh, UDMaterial, UDMasterMaterial,
-	UDActorLight, UDActorCamera, UDMesh) 
+	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name) 
 from mathutils import Matrix
+
+import logging
+log = logging.getLogger(__name__)
+log.setLevel(logging.DEBUG)
 
 
 matrix_datasmith = Matrix.Scale(100, 4)
@@ -22,22 +26,141 @@ matrix_forward = Matrix((
 	(0, 0, 0, 1)
 ))
 
-def collect_materials(materials, uscene):
+
+
+
+def TexNode(type, texture):
+	return Node(type, {
+		'tex': texture,
+		'coordinate': 0,
+		'sx': 1.0,
+		'sy': 1.0,
+		'ox': 0.0,
+		'oy': 0.0,
+		'mx': 0,
+		'my': 0,
+		'rot': 0.0,
+		'mul': 1.0,
+		'channel': 0,
+		'inv': 0,
+		'cropped':0,
+		
+	})
+
+def make_scalar_node(name, value, **kwargs):
+	return Node(name, attrs={'value': value, **kwargs})
+
+def make_rgba_node(name, color):
+	return Node(name, attrs={
+		'R': color[0],
+		'G': color[1],
+		'B': color[2],
+		'A': color[3],
+		})
+
+def make_basic_ushader(base_name, material):
+	shader = Node('Shader')
+	shader.children = [
+		make_rgba_node('Diffusecolor', material.diffuse_color),
+		make_scalar_node('Metalval', material.metallic),
+		make_scalar_node('Specularval', material.specular_intensity),
+		make_scalar_node('Roughnessval', material.roughness, desc='Roughness'),
+	]
+	return shader
+
+
+def make_default_node(field, name):
+	node = Node(name)
+	default = field.default_value
+	if field.type == 'VALUE':
+		node['value'] = "%.6f" % default
+	elif field.type == 'RGBA':
+		node['R'] = '%.6f' % default[0]
+		node['G'] = '%.6f' % default[1]
+		node['B'] = '%.6f' % default[2]
+		node['A'] = '%.6f' % default[3]
+
+	return node
+
+
+def make_field_node(field, name, default_name):
+	if field.links:
+		input_node = field.links[0].from_node
+		if input_node.type == 'TEX_IMAGE':
+			# if it is a texture
+			image = input_node.image
+			image_name = sanitize_name(image.name)
+			node = TexNode(name, image_name)
+			# also make sure that the scene has a reference to this texture
+			texture = UDScene.current_scene.get_field(UDTexture, image_name)
+			texture.image = image
+
+			return node
+		else:
+			log.error("unhandled node")
+
+	return make_default_node(field, default_name)
+
+def make_ushader(base_name, mat_node=None):
+
+	shader = Node('Shader')
+	shader['name'] = base_name + '_0'
+	if not mat_node:
+		return shader
+
+	# TODO handle anything other than principled bsdf
+	if mat_node.type == 'MIX_SHADER':
+		pass
+	elif mat_node.type == 'BSDF_PRINCIPLED':
+		inputs = mat_node.inputs
+
+		params = []
+		base_color = inputs['Base Color']
+		log.info("material name" + str(base_name))
+		log.info("base_color links:" + str(base_color.links))
+		params.append(make_field_node(base_color, 'Diffuse', 'Diffusecolor'))
+		params.append(make_field_node(inputs['IOR'], 'IOR', 'IOR'))
+		params.append(make_field_node(inputs['Metallic'], 'Metallic', 'Metalval'))
+		params.append(make_field_node(inputs['Roughness'], 'Roughness', 'Roughnessval'))
+		params.append(make_field_node(inputs['Specular'], 'Specular', 'Specularval'))
+
+
+		shader.children = params
+
+	elif mat_node.type == 'BSDF_TRANSPARENT':
+		pass
+		
+	return shader
+
+
+
+def collect_materials(materials):
 	for mat in materials:
-		mat_name = getattr(mat, 'name', 'default_material')
-		if mat_name in uscene.materials:
+		if not mat: # material may be none
 			continue
+
+		mat_name = sanitize_name(mat.name)
+		if mat_name in UDScene.current_scene.materials:
+			continue
+
+		umat = UDScene.current_scene.get_field(UDMaterial, mat_name)
+		if not mat.node_tree:
+			umat.children = [make_basic_ushader(mat_name, mat)]
+			continue
+
+		log.debug(mat.name)
 		output = mat.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
-        surface_input = output.inputs['Surface']
-        if surface_input.links:
-                surface = surface_input.links[0].from_node
+
+		# this might need a big refactoring, to handle all the possible cases 
+		output_links = output.inputs['Surface'].links
+
+		if output_links:
+			surface_input = output_links[0].from_node
+			umat.children = [make_ushader(mat_name, surface_input)]
+		else:
+			umat.children = [make_ushader(mat_name)]
 
 
-        displacement = outputs.inputs['Displacement']
-
-		umat = UDMasterMaterial.new(parent=uscene, name=mat_name)
-		if mat:
-			umat.properties['Color'] = UDMasterMaterial.PropColor(mat.diffuse_color)
 
 
 def collect_mesh(bl_mesh, uscene):
@@ -71,7 +194,7 @@ def collect_mesh(bl_mesh, uscene):
 
 	
 	umesh.materials = [mat.name if mat else 'None' for mat in bl_mesh.materials]
-	collect_materials(bl_mesh.materials, uscene)
+	collect_materials(bl_mesh.materials)
 
 	#for idx, mat in enumerate(bl_mesh.materials):
 	#    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
@@ -83,10 +206,13 @@ def collect_mesh(bl_mesh, uscene):
 	
 	umesh.triangles = [l.vertex_index for l in m.loops]
 	umesh.vertex_normals = [matrix_normals @ l.normal for l in m.loops] # don't know why, but copy is needed for this only
-	umesh.uvs = [m.uv_layers[0].data[l.index].uv.copy() for l in m.loops]
+	umesh.uvs = [fix_uv(m.uv_layers[0].data[l.index].uv.copy()) for l in m.loops]
 	
 	bpy.data.meshes.remove(m) 
 	return umesh
+
+def fix_uv(data):
+	return (data[0], 1-data[1])
 
 def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, name_override=None):
 	if parent is None:
@@ -105,13 +231,14 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 			uobj = UDActorMesh.new(**kwargs)
 			umesh = collect_mesh(bl_obj.data, uscene)
 			uobj.mesh = umesh.name
-                        for idx, slot in enumerate(bl_obj.material_slots):
-                                if slot.link == 'OBJECT':
-                                        collect_materials([slot.material], uscene)
-                                        uobj.materials[idx] = slot.material.name
-                                        
+			for idx, slot in enumerate(bl_obj.material_slots):
+				if slot.link == 'OBJECT':
+					collect_materials([slot.material], uscene)
+					uobj.materials[idx] = slot.material.name
+
 		else: # if is a mesh with no polys, treat as empty
 			uobj = UDActor.new(**kwargs)
+
 	elif bl_obj.type == 'CAMERA':
 		uobj = UDActorCamera.new(**kwargs)
 		bl_cam = bl_obj.data
@@ -119,13 +246,18 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 		uobj.focus_distance = bl_cam.dof_distance
 		uobj.sensor_width = bl_cam.sensor_width
 
-	elif bl_obj.type == 'LAMP' or bl_obj.type == 'LIGHT':
+	elif bl_obj.type == 'LIGHT':
 		uobj = UDActorLight.new(**kwargs)
 		bl_light = bl_obj.data
 
-		node = bl_light.node_tree.nodes['Emission']
-		uobj.color = node.inputs['Color'].default_value
-		uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+		if bl_light.node_tree:
+
+			node = bl_light.node_tree.nodes['Emission']
+			uobj.color = node.inputs['Color'].default_value
+			uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+		else:
+			uobj.color = bl_light.color
+			uobj.intensity = bl_light.energy
 
 		if bl_light.type == 'POINT':
 			uobj.type = UDActorLight.LIGHT_POINT
@@ -153,8 +285,8 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 	uobj.transform.rot = rot
 	uobj.transform.scale = scale
 	
-	if bl_obj.dupli_type == 'COLLECTION':
-		duplis = bl_obj.dupli_group.objects
+	if bl_obj.instance_type == 'COLLECTION':
+		duplis = bl_obj.instance_collection.objects
 		for idx, dup in enumerate(duplis):
 			dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
 			collect_object(dup, uscene, parent=uobj, context=context, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
@@ -168,9 +300,9 @@ def collect_to_uscene(context):
 	root_objects = [obj for obj in all_objects if obj.parent is None]
 	
 	uscene = UDScene()
+	UDScene.current_scene = uscene # FIXME
 	for obj in root_objects:
 		uobj = collect_object(obj, uscene, context=context)
-	
 	return uscene
 
 def save(operator, context,*, filepath, **kwargs):
@@ -180,6 +312,7 @@ def save(operator, context,*, filepath, **kwargs):
 	basedir, basename = path.split(basepath)
 	scene = collect_to_uscene(bpy.context)
 	scene.save(basedir, basename) 
+	UDScene.current_scene = None # FIXME
 
 	return {'FINISHED'}
 	
