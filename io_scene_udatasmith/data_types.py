@@ -359,46 +359,36 @@ class UDShader(UDElement):
 		UDShader.shader_count += 1
 
 class UDMasterMaterial(UDMaterial):
-	class Prop:
-		prop_type = None
-		def __init__(self, value):
-			self.value = value
-		def render(self, parent, name):
-			return ElementTree.SubElement(parent, 'KeyValueProperty', name=name, type=self.prop_type, val=repr(self))
-		def __repr__(self):
-			return repr(self.value)
-	class PropColor(Prop):
-		prop_type = 'Color'
-		def __init__(self, value):
-			self.parse(value) if type(value) == str else super().__init__(value)
-		def parse(self, src):
-			import re
-			self.value = tuple(map(float, re.match(r"\(R=(-?[\d.]*),G=(-?[\d.]*),B=(-?[\d.]*),A=(-?[\d.]*)\)", src).groups()))
-		def __repr__(self):
-			r, g, b, a = (1.0,1.0,1.0,1.0)
-			return '(R={:6f},G={:6f},B={:6f},A={:6f})'.format(r, g, b, a)
-	class PropBool(Prop):
-		prop_type = 'Bool'
-		def __init__(self, value):
-			self.value = value
-			if type(value) is str:
-				self.value = True if value == 'true' else False
-		def __repr__(self):
-			return 'true' if self.b else 'false'
-	class PropTexture(Prop):
-		prop_type = 'Texture'
-	class PropFloat(Prop):
-		prop_type = 'Float'
-		def __init__(self, value):
-			self.value = value
-			if type(value) is str:
-				self.value = float(value)
+	def prop_color(value):
+		data = {
+			'prop_type': 'Color'
+		}
+		data['value'] = tuple(map(float, re.match(r"\(R=(-?[\d.]*),G=(-?[\d.]*),B=(-?[\d.]*),A=(-?[\d.]*)\)", src).groups()))
+		return data
+
+	def prop_bool(Prop):
+		data = {
+			'prop_type': 'Bool'
+		}
+		data['value'] = True if value == 'true' else False
+		return data
+
+	def prop_texture(value):
+		return {
+			'prop_type': 'Texture'
+		}
+
+	def prop_float(value):
+		return {
+			'prop_type': 'Float',
+			'value': float(value),
+		}
 
 	types = {
-		"Color": PropColor,
-		"Bool": PropBool,
-		"Texture":PropTexture,
-		"Float": PropFloat,
+		"Color": prop_color,
+		"Bool": prop_bool,
+		"Texture": prop_texture,
+		"Float": prop_float,
 	}
 
 	'''sketchup datasmith outputs Master material, it may be different'''
@@ -409,15 +399,17 @@ class UDMasterMaterial(UDMaterial):
 		self.properties = {}
 		if node is not None:
 			for prop in node.findall('KeyValueProperty'):
-				self.properties[prop.attrib['name']] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
+				prop_name = prop.attrib['name']
+				prop_type = prop.attrib['type']
 
-	def render(self, parent):
-		elem = super().render(parent)
-		elem.attrib['Type'] = '1'
-		elem.attrib['Quality'] = '0'
-		elem.attrib['label'] = self.name
-		for name, prop in self.properties.items():
-			prop.render(name=name, parent=elem)
+				self.properties[name] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
+
+	@staticmethod
+	def new(name, parent, node):
+		ob = UDScene.current_scene.get_field(UDMasterMaterial, name)
+		if ob:
+			return ob
+		return UDMasterMaterial(node=node, name=name)
 
 class UDTexture(UDElement):
 	node_type = 'Texture'
@@ -655,7 +647,7 @@ class UDScene(UDElement):
 	def get_field(self, cls, name):
 		group = getattr(self, cls.node_group)
 		if not group:
-			print("trying to write invalid group")
+			log.error("trying to get invalid group")
 
 		if name in group:
 			return group[name]
@@ -699,6 +691,7 @@ class UDScene(UDElement):
 
 		mappings = {cls.node_type:cls for cls in classes} 
 
+		UDScene.current_scene = self
 		for node in root:
 			name = node.get('name') # most relevant nodes have a name as identifier
 			cls = mappings.get(node.tag)

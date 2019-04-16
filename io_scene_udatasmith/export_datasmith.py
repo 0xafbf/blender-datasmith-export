@@ -276,7 +276,7 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 
 	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
-	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LAMP':
+	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LIGHT':
 		# use this correction because lights/cameras in blender point -Z
 		obj_mat = obj_mat @ matrix_forward
 
