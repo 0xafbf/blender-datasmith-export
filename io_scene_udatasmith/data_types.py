@@ -65,7 +65,11 @@ def write_string(io, string):
 	io.write(string_bytes)
 
 def sanitize_name(name):
-	return name.replace('.', '_')
+	return name.replace('.', '_dot')
+
+
+def f(x):
+	return '{:6f}'.format(x)
 
 # i am introducing this as I want to change some of how the API works
 
@@ -78,89 +82,49 @@ class Node:
 
 	def __getitem__(self, key):
 		return self.attrs[key]
-	
+
 	def __setitem__(self, key, value):
-		self.attrs[key] = value        
-		
-	def __str__(self):
+		self.attrs[key] = value
+
+	def string_rep(self):
 		output = '<{}'.format(self.name)
 		for attr in self.attrs:
 			output += ' {key}="{value}"'.format(key=attr, value=self.attrs[attr])
-			
+
 		if not self.children:
 			output += '/>'
 			return output
 		output += '>'
-		
+
 		for child in self.children:
-			
+
 			output += str(child)
-			
+
 		output += '</{}>'.format(self.name)
-		
+
 		return output
-	
+
+	def __str__(self):
+		return self.string_rep()
+	def push(self, value):
+		self.children.append(value)
 
 
+def node_value(name, value):
+	return Node(name, {'value': f(value)})
 
 
-
-class UDElement:
-	"""convenience for all elements in the udatasmith file"""
-	node_type = 'Element'
-	node_group = None
-
-	class UDElementException(Exception):
-		pass
-
-	@classmethod
-	def new(cls, name, parent=None, **kwargs): # I want to deprecate all this stuff
-		if parent is None:
-			raise UDElementException('Tried to create an element without a parent.')
-		if cls.node_group is None:
-			raise UDElementException("%s doesn't override `node_group`, without it, parent registration won't work.")
-		
-		group = getattr(parent, cls.node_group, {})
-
-		name = sanitize_name(name)
-
-		elem = group.get(name)
-		if elem:
-			return elem
-			
-		new_object = cls(parent=parent, name=name, **kwargs)
-		
-		if not new_object.name:
-			raise UDElementException("object created without name")
-
-		group = getattr(parent, cls.node_group, {})
-		group[new_object.name] = new_object
-		setattr(parent, cls.node_group, group)
-
-		return new_object
-
-
-	def render(self, parent): # maybe the only thing, but still not convinced
-		elem = ElementTree.SubElement(parent, self.node_type)
-		elem.attrib['name'] = self.name
-		return elem
-
-	def __repr__(self):
-		return '{}: {}'.format(type(self).__name__, self.name)
-
-
-class UDMesh(UDElement):
+class UDMesh():
 	node_type = 'StaticMesh'
 	node_group = 'meshes'
 
-	def __init__(self, path=None, node:ElementTree.Element = None, parent = None, name=None):
-		self.parent = parent
+	def __init__(self, path=None, node:ElementTree.Element = None, name=None):
 		self.name = name
 		if node:
 			self.init_with_xmlnode(node)
 		elif path:
 			self.init_with_path(path)
-		
+
 		else:
 			self.init_fields()
 
@@ -193,7 +157,7 @@ class UDMesh(UDElement):
 		self.name = node.attrib['name']
 		self.label = node.attrib['label']
 		self.relative_path = node.find('file').attrib['path']
-		
+
 		parent_path = path.dirname(os.path.abspath(self.parent.path))
 		self.init_with_path(path.join(parent_path, self.relative_path))
 		# self.materials = {n.attrib['id']: n.attrib['name'] for n in node.iter('Material')}
@@ -220,13 +184,13 @@ class UDMesh(UDElement):
 			self.name = read_string(file)
 
 			self.a02 = file.read(5)
-			
+
 			self.source_models = read_string(file)
 			self.struct_property = read_string(file)
 			self.a03 = file.read(8)
 
 			self.datasmith_mesh_source_model = read_string(file)
-			
+
 			self.a04 = file.read(25) # just zeros
 
 			self.payload_length = read_data(file, 'II') # this is the size of the rawmesh
@@ -238,10 +202,10 @@ class UDMesh(UDElement):
 
 			self.tris_material_slot = read_array_data(file, "I") #FaceMaterialIndices
 			self.tris_smoothing_group = read_array_data(file, "I") #FaceSmoothingMasks
-			
+
 			self.vertices = read_array_data(file, "fff") #VertexPositions
 			self.triangles = read_array_data(file, "I") #WedgeIndices
-			
+
 			self.a05 = read_array_data(file, "I") # WedgeTangentX (maybe)
 			self.a06 = read_array_data(file, "I") # WedgeTangentY (maybe)
 
@@ -254,14 +218,14 @@ class UDMesh(UDElement):
 			self.a07_c = file.read(4) # MaterialIndexToImportIndex?
 
 			self.checksum = file.read(16) # I guess this is Guid?
-			
+
 			self.a08 = file.read() # And maybe this is bGuidIsHash
-			
+
 			# small check here to crash if something is suspicious
 			assert len(self.triangles) == len(self.uvs)
 			assert len(self.vertex_normals) == len(self.uvs)
 			assert self.a08 == b'\x00\x00\x00\x00' # just to be sure its the end
-		
+
 	def write_to_path(self, path):
 		with open(path, 'wb') as file:
 			#write_null(file, 8)
@@ -276,7 +240,7 @@ class UDMesh(UDElement):
 			write_null(file, 8)
 
 			write_string(file, self.datasmith_mesh_source_model)
-			
+
 			write_null(file, 25)
 
 			size_loc = file.tell() # here we have to write the rawmesh size two times
@@ -301,7 +265,7 @@ class UDMesh(UDElement):
 			write_array_data(file, 'fff', self.vertex_normals)
 			write_array_data(file, 'ff', self.uvs)
 			write_null(file, 36)
-			
+
 			#here ends rawmesh
 			mesh_end = file.tell()
 
@@ -316,23 +280,25 @@ class UDMesh(UDElement):
 			file.seek(0)
 			write_data(file, 'II', 1, file_end - file_start)
 
-	def render(self, parent):
-		elem = super().render(parent=parent)
-		elem.attrib['label'] = self.name
+	def node(self):
+		n = Node('StaticMesh')
+		n['label'] = self.name
+		n['name'] = self.name
+
 		for idx, m in enumerate(self.materials):
-			ElementTree.SubElement(elem, 'Material', id=str(idx), name=sanitize_name(m))
+			n.push(Node('Material', {'id':idx, 'name':m}))
 		if self.relative_path:
 			path = self.relative_path.replace('\\', '/')
-			ElementTree.SubElement(elem, 'file', path=path)
-		lm_uv = ElementTree.SubElement(elem, 'LightmapUV', value='-1')
-		ElementTree.SubElement(elem, 'Hash', value=self.hash)
-		return elem
+			n.push(Node('file', {'path':path }))
+		n.push(Node('LightmapUV', {'value': '-1'}))
+		n.push(Node('Hash', {'value': self.hash}))
+		return n
 
 	def save(self, basedir, folder_name):
 		self.relative_path = path.join(folder_name, self.name + '.udsmesh')
 		abs_path = path.join(basedir, self.relative_path)
 		self.write_to_path(abs_path)
-		
+
 		import hashlib
 		hash_md5 = hashlib.md5()
 		with open(abs_path, "rb") as f:
@@ -342,20 +308,26 @@ class UDMesh(UDElement):
 
 
 
-class UDMaterial(Node):
+class UDMaterial():
 	node_type = 'Material'
 	node_group = 'materials'
 
 	def __init__(self, name: str, node=None, parent=None, **kwargs):
-		super().__init__(self.node_type)
-		self.attrs['name'] = name
+		self.name = name
+		self.children = []
+	def node(self):
+		n = Node('Material')
+		n['name'] = self.name
+		for child in self.children:
+			n.push(child)
+		return n
 
-class UDShader(UDElement):
+class UDShader():
 	node_type = 'Shader'
 	node_group = 'shaders'
 	shader_count = 0
 	def __init__(self):
-		self.name = "Shader_%d" % (UDShader.shader_count)
+		self['name'] = "Shader_%d" % (UDShader.shader_count)
 		UDShader.shader_count += 1
 
 class UDMasterMaterial(UDMaterial):
@@ -404,30 +376,10 @@ class UDMasterMaterial(UDMaterial):
 
 				self.properties[name] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
 
-	@staticmethod
-	def new(name, parent, node):
-		ob = UDScene.current_scene.get_field(UDMasterMaterial, name)
-		if ob:
-			return ob
-		return UDMasterMaterial(node=node, name=name)
 
-class UDTexture(UDElement):
+class UDTexture():
 	node_type = 'Texture'
 	node_group = 'textures'
-
-	@classmethod
-	def new(cls, name, node=None,**kwargs):
-	# Need to override as it is possible to have textures with the same name
-	# but different path
-		
-		if node:
-			folder, file = path.split(node.attrib['file'])
-			name = file
-
-		new_object = UDScene.current_scene.get_field(UDTexture, name)
-
-		# TODO: check when loaded textures have same name but different path
-		return new_object
 
 	def __init__(self, *, node=None, name=None):
 		self.name = name
@@ -444,16 +396,14 @@ class UDTexture(UDElement):
 				#ext = 'png'
 		return "{}/{}.{}".format(UDScene.current_scene.export_path, self.name, ext)
 
-	def __str__(self):
-		r = Node('Texture')
-		r['name'] = self.name
-		r['file'] = self.abs_path()
-		r['rgbcurve'] = 1.0
-		r['texturemode'] = '5'
-		r.children = [
-			Node('Hash', {'value': self.hash})
-		]
-		return str(r)
+	def node(self):
+		n = Node('Texture')
+		n['name'] = self.name
+		n['file'] = self.abs_path()
+		n['rgbcurve'] = 1.0
+		n['texturemode'] = '5'
+		n.push(Node('Hash', {'value': self.hash}))
+		return n
 
 	def save(self):
 		image_path = path.join(UDScene.current_scene.basedir, self.abs_path())
@@ -469,39 +419,53 @@ class UDTexture(UDElement):
 		self.hash = hash_md5.hexdigest()
 
 
-class UDActor(UDElement):
+class UDActor():
 
 	node_type = 'Actor'
 	node_group = 'objects'
 
-	class Transform:
-		def __init__(self, tx=0, ty=0, tz=0, 
+	def get_field(self, cls, name, **kwargs):
+		group = getattr(self, cls.node_group)
+		if not group:
+			log.error("trying to get invalid group")
+
+		if name in group:
+			return group[name]
+
+		new_object = cls(name=name, **kwargs)
+		group[name] = new_object
+		return new_object
+
+	class Transform():
+		def __init__(self, tx=0, ty=0, tz=0,
 					 qw=0, qx=0, qy=0, qz=0,
 					 sx=0, sy=0, sz=0, qhex = None):
 			self.loc = (float(tx), float(ty), float(tz))
 			self.rot = (float(qw), float(qx), float(qy), float(qz))
 			self.scale = (float(sx), float(sy), float(sz))
 			# don't know what qhex is
-		def render(self, parent):
-			f = lambda n: "{:.6f}".format(n)
-			tx, ty, tz = self.loc
-			qw, qx, qy, qz = self.rot
-			sx, sy, sz = self.scale
-			return ElementTree.SubElement(parent, 'Transform',
-					tx=f(tx), ty=f(ty), tz=f(tz), 
-					qw=f(qw), qx=f(qx), qy=f(qy), qz=f(qz),
-					sx=f(sx), sy=f(sy), sz=f(sz),
-				)
+		def node(self):
+			n = Node('Transform')
+			n['tx'] = f(self.loc.x)
+			n['ty'] = f(self.loc.y)
+			n['tz'] = f(self.loc.z)
+			n['qw'] = f(self.rot.w)
+			n['qx'] = f(self.rot.x)
+			n['qy'] = f(self.rot.y)
+			n['qz'] = f(self.rot.z)
+			n['sx'] = f(self.scale.x)
+			n['sy'] = f(self.scale.y)
+			n['sz'] = f(self.scale.z)
+			return n
 
 
-
-	def __init__(self, *, parent, node=None, name=None, layer='Default'):
+	def __init__(self, *, node=None, name=None, layer='Default'):
 		self.transform = UDActor.Transform()
 		self.objects = {}
 		self.materials = {}
 		self.name = name
 		self.layer = layer
-		if node:
+		if node: # for import
 			self.name = node.attrib['name']
 			self.layer = node.attrib['layer']
 			node_transform = node.find('Transform')
@@ -514,38 +478,40 @@ class UDActor(UDElement):
 				for child in node_children:
 					name = child.attrib["name"]
 					if child.tag == "Actor":
-						UDActor.new(name=name, node=child, parent=self)
+						UDActor(name=name, node=child)
 					if child.tag == "ActorMesh":
-						UDActorMesh.new(name=name, node=child, parent=self)
+						UDActorMesh(name=name, node=child)
 
-	def render(self, parent):
-		elem = super().render(parent)
-		elem.attrib['layer'] = self.layer
-		self.transform.render(elem)
+	def node(self):
+		n = Node('Actor')
+		n['name'] = self.name
+		n['layer'] = self.layer
+		n.push(self.transform.node())
 
 		if len(self.objects) > 0:
-			children = ElementTree.SubElement(elem, 'children')
+			children_node = Node("children");
 			for name, child in self.objects.items():
-				child.render(children)
-
-		return elem
+				children_node.push(child.node())
+			n.push(children_node)
+		return n
 
 
 class UDActorMesh(UDActor):
 
 	node_type = 'ActorMesh'
 
-	def __init__(self, *, parent, node=None, name=None):
-		super().__init__(parent=parent, node=node, name=name)
+	def __init__(self, *, node=None, name=None):
+		super().__init__(node=node, name=name)
 		if node:
 			self.mesh = node.find('mesh').attrib['name']
 			self.materials = {n.attrib['id']: n.attrib['name'] for n in node.findall('material')}
 
-	def render(self, parent):
-		elem = super().render(parent)
-		mesh = ElementTree.SubElement(elem, 'mesh')
-		mesh.attrib['name'] = sanitize_name(self.mesh)
-		
+	def node(self):
+		n = super().node()
+		n.name = 'ActorMesh'
+		n.push(Node('mesh', {'name': self.mesh}))
+		return n
+
 
 class UDActorLight(UDActor):
 
@@ -556,8 +522,8 @@ class UDActorLight(UDActor):
 
 	LIGHT_UNIT_CANDELAS = 'Candelas'
 
-	def __init__(self, *, parent, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
-		super().__init__(parent=parent, node=node, name=name)
+	def __init__(self, *, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
+		super().__init__(node=node, name=name)
 		self.type = light_type
 		self.intensity = 1500
 		self.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
@@ -576,30 +542,32 @@ class UDActorLight(UDActor):
 		# self.inner_cone_angle =	node.find('InnerConeAngle').attrib['value']
 		# self.outer_cone_angle =	node.find('OuterConeAngle').attrib['value']
 
-	def render(self, parent):
-		elem = super().render(parent)
-		elem.attrib['type'] = self.type
-		elem.attrib['enabled'] = '1'
-		ElementTree.SubElement(elem, 'Intensity',     	value='{:6f}'.format(self.intensity))
-		ElementTree.SubElement(elem, 'IntensityUnits',	value=self.intensity_units)
-		f= '{:6f}'
-		ElementTree.SubElement(	elem, 'Color', usetemp='0', temperature='6500.0',
-								R=f.format(self.color[0]),
-								G=f.format(self.color[1]),
-								B=f.format(self.color[2]),
-		)
+	def node(self):
+		n = super().node()
+		n.name = 'Light'
+		n['type'] = self.type
+		n['enabled'] = '1'
+		val = node_value
+		n.push(val('Intensity', self.intensity))
+		n.push(Node('IntensityUnits', {'value': self.intensity_units}))
+		n.push(Node('Color', {
+			'usetemp': '0',
+			'temperature': '6500.0',
+			'R': f(self.color[0]),
+			'G': f(self.color[1]),
+			'B': f(self.color[2]),
+			}))
 		if self.type == UDActorLight.LIGHT_SPOT:
-			ElementTree.SubElement(elem, 'InnerConeAngle',	value='{:6f}'.format(self.inner_cone_angle))
-			ElementTree.SubElement(elem, 'OuterConeAngle',	value='{:6f}'.format(self.outer_cone_angle))
-		return elem
-
+			n.push(val('InnerConeAngle', self.inner_cone_angle))
+			n.push(val('OuterConeAngle', self.outer_cone_angle))
+		return n
 
 class UDActorCamera(UDActor):
 
 	node_type = 'Camera'
 
-	def __init__(self, *, parent, node=None, name=None):
-		super().__init__(parent=parent, node=node, name=name)
+	def __init__(self, *, node=None, name=None):
+		super().__init__(node=node, name=name)
 		self.sensor_width = 36.0
 		self.sensor_aspect_ratio = 1.777778
 		self.focus_distance = 1000.0
@@ -616,24 +584,22 @@ class UDActorCamera(UDActor):
 		self.f_stop =             	node.find('FStop').attrib['value']
 		self.focal_length =       	node.find('FocalLength').attrib['value']
 
-	def render(self, parent):
-		elem = super().render(parent)
-		ElementTree.SubElement(elem, 'SensorWidth',      	value='{:6f}'.format(self.sensor_width))
-		ElementTree.SubElement(elem, 'SensorAspectRatio',	value='{:6f}'.format(self.sensor_aspect_ratio))
-		ElementTree.SubElement(elem, 'FocusDistance',    	value='{:6f}'.format(self.focus_distance))
-		ElementTree.SubElement(elem, 'FStop',            	value='{:6f}'.format(self.f_stop))
-		ElementTree.SubElement(elem, 'FocalLength',      	value='{:6f}'.format(self.focal_length))
-		ElementTree.SubElement(elem, 'Post')
-		return elem
+	def node(self):
+		n = super().node()
+		n.name = 'Camera'
+		val = node_value
+		n.push(val('SensorWidth', self.sensor_width))
+		n.push(val('SensorAspectRatio', self.sensor_aspect_ratio))
+		n.push(val('FocusDistance', self.focus_distance))
+		n.push(val('FStop', self.f_stop))
+		n.push(val('FocalLength', self.focal_length))
+		n.push(Node('Post'))
+		return n
 
 
-
-
-
-class UDScene(UDElement):
+class UDScene():
 
 	node_type = 'DatasmithUnrealScene'
-
 	current_scene = None
 
 	def __init__(self, source=None):
@@ -644,7 +610,7 @@ class UDScene(UDElement):
 
 		self.check_fields() # to test if it is possible for these fields to have different values
 
-	def get_field(self, cls, name):
+	def get_field(self, cls, name, **kwargs):
 		group = getattr(self, cls.node_group)
 		if not group:
 			log.error("trying to get invalid group")
@@ -652,7 +618,7 @@ class UDScene(UDElement):
 		if name in group:
 			return group[name]
 
-		new_object = cls(name=name)
+		new_object = cls(name=name, **kwargs)
 		group[name] = new_object
 		return new_object
 
@@ -670,6 +636,7 @@ class UDScene(UDElement):
 
 	def init_with_path(self, path):
 
+		# unmantained, for importing.
 		tree = ElementTree.parse(path)
 		root = tree.getroot()
 
@@ -689,43 +656,44 @@ class UDScene(UDElement):
 			UDActorLight,
 		]
 
-		mappings = {cls.node_type:cls for cls in classes} 
+		mappings = {cls.node_type:cls for cls in classes}
 
 		UDScene.current_scene = self
 		for node in root:
 			name = node.get('name') # most relevant nodes have a name as identifier
 			cls = mappings.get(node.tag)
 			if cls:
-				cls.new(parent=self, name=name, node=node)
+				uobj = cls(name=name, node=node)
+				self.objects.push(uobj)
 
 		print("loaded")
 
-	def render(self):
-		tree = ElementTree.Element('DatasmithUnrealScene')
+	def node(self):
+		n = Node('DatasmithUnrealScene')
+		n.push(Node('Version', children=['0.20']))
+		n.push(Node('SDKVersion', children=['4.20E1']))
+		n.push(Node('Host', children=['Blender']))
+		n.push(Node('Application', {
+			'Vendor': 'Blender',
+			'ProductName': 'Blender',
+			'ProductVersion': '2.80',
+			}))
 
-		version = ElementTree.SubElement(tree, 'Version')
-		version.text = '0.20' # to get from context?
-
-		sdk = ElementTree.SubElement(tree, 'SDKVersion')
-		sdk.text = '4.20E1' # to get from context?
-
-		host = ElementTree.SubElement(tree, 'Host')
-		host.text = 'Blender'
-
-		application = ElementTree.SubElement(tree, 'Application', Vendor='Blender', ProductName='Blender', ProductVersion='2.80')
-		user = ElementTree.SubElement(tree, 'User', ID='00000000000000000000000000000000', OS='Windows 8.1')
+		n.push(Node('User', {
+			'ID': '00000000000000000000000000000000',
+			'OS': 'Windows 8.1',
+			}))
 
 		for name, obj in self.objects.items():
-			obj.render(tree)
+			n.push(obj.node())
 		for name, mesh in self.meshes.items():
-			mesh.render(tree)
+			n.push(mesh.node())
 		for name, mat in self.materials.items():
-			tree.append(ElementTree.XML(str(mat)))
+			n.push(mat.node())
 		for name, tex in self.textures.items():
-			tree.append(ElementTree.XML(str(tex)))
+			n.push(tex.node())
 
-
-		return tree
+		return n
 
 	def save(self, basedir, name):
 		self.name = name
@@ -743,14 +711,17 @@ class UDScene(UDElement):
 			mesh.save(basedir, folder_name)
 		for _name, tex in self.textures.items():
 			tex.save()
-		
-		tree = self.render()
-		txt = ElementTree.tostring(tree)
+
+		log.info("building XML tree")
+
+		tree = str(self.node())
 		from xml.dom import minidom
-		pretty_xml = minidom.parseString(txt).toprettyxml()
+		pretty_xml = minidom.parseString(tree).toprettyxml()
+		#pretty_xml = tree
 
 		filename = path.join(basedir, self.name + '.udatasmith')
-
+		log.info("writing to file")
 		with open(filename, 'w') as f:
 			f.write(pretty_xml)
-	
+		log.info("export successful")
+

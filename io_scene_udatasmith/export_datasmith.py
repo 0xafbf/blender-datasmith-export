@@ -4,7 +4,7 @@ import bmesh
 import math
 from io_scene_udatasmith.data_types import (
 	UDScene, UDActor, UDActorMesh, UDMaterial, UDMasterMaterial,
-	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name) 
+	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix
 
 import logging
@@ -13,7 +13,7 @@ log.setLevel(logging.DEBUG)
 
 
 matrix_datasmith = Matrix.Scale(100, 4)
-matrix_datasmith[1][1] *= -1.0   
+matrix_datasmith[1][1] *= -1.0
 
 matrix_normals = Matrix.Scale(-1, 4)
 #matrix_normals[1][1] = -1
@@ -44,7 +44,7 @@ def TexNode(type, texture):
 		'channel': 0,
 		'inv': 0,
 		'cropped':0,
-		
+
 	})
 
 def make_scalar_node(name, value, **kwargs):
@@ -129,29 +129,30 @@ def make_ushader(base_name, mat_node=None):
 
 	elif mat_node.type == 'BSDF_TRANSPARENT':
 		pass
-		
+
 	return shader
 
 
 
-def collect_materials(materials):
+def collect_materials(scene, materials):
+	umats = []
 	for mat in materials:
 		if not mat: # material may be none
 			continue
 
 		mat_name = sanitize_name(mat.name)
-		if mat_name in UDScene.current_scene.materials:
-			continue
+		umat = scene.get_field(UDMaterial, mat_name)
+		umats.append(umat)
 
-		umat = UDScene.current_scene.get_field(UDMaterial, mat_name)
 		if not mat.node_tree:
 			umat.children = [make_basic_ushader(mat_name, mat)]
 			continue
 
 		log.debug(mat.name)
+		log.debug(umat.name)
 		output = mat.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
 
-		# this might need a big refactoring, to handle all the possible cases 
+		# this might need a big refactoring, to handle all the possible cases
 		output_links = output.inputs['Surface'].links
 
 		if output_links:
@@ -160,13 +161,15 @@ def collect_materials(materials):
 		else:
 			umat.children = [make_ushader(mat_name)]
 
+	return umats
+
 
 
 
 def collect_mesh(bl_mesh, uscene):
 
 	# when using linked libraries, some meshes can have the same name
-	mesh_name = bl_mesh.name
+	mesh_name = sanitize_name(bl_mesh.name)
 	if bl_mesh.library:
 		#import pdb; pdb.set_trace()
 		lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
@@ -175,7 +178,7 @@ def collect_mesh(bl_mesh, uscene):
 			prefix = prefix[:-6] + '_'
 		mesh_name = prefix + mesh_name
 
-	umesh = UDMesh.new(name=mesh_name, parent=uscene)
+	umesh = uscene.get_field(UDMesh, name=mesh_name)
 	if len(umesh.vertices) > 0:
 		# mesh already processed
 		return umesh
@@ -192,43 +195,41 @@ def collect_mesh(bl_mesh, uscene):
 	# not sure if this is the best way to read normals
 	m.calc_normals_split()
 
-	
-	umesh.materials = [mat.name if mat else 'None' for mat in bl_mesh.materials]
-	collect_materials(bl_mesh.materials)
+
+	umats = collect_materials(uscene, bl_mesh.materials)
+	umesh.materials = [umat.name for umat in umats]
 
 	#for idx, mat in enumerate(bl_mesh.materials):
 	#    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
-	
+
 	umesh.tris_material_slot = [p.material_index for p in m.polygons]
 	umesh.tris_smoothing_group = [0 for p in m.polygons] # no smoothing groups for now
-	
+
 	umesh.vertices = [v.co.copy() for v in m.vertices]
-	
+
 	umesh.triangles = [l.vertex_index for l in m.loops]
 	umesh.vertex_normals = [matrix_normals @ l.normal for l in m.loops] # don't know why, but copy is needed for this only
 	umesh.uvs = [fix_uv(m.uv_layers[0].data[l.index].uv.copy()) for l in m.loops]
-	
-	bpy.data.meshes.remove(m) 
+
+	bpy.data.meshes.remove(m)
 	return umesh
 
 def fix_uv(data):
 	return (data[0], 1-data[1])
 
-def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, name_override=None):
-	if parent is None:
-		parent = uscene
+def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=None):
+
 	uobj = None
-	
+
 	kwargs = {}
-	kwargs['parent'] = parent
 	kwargs['name'] = bl_obj.name
 	if name_override:
 		kwargs['name'] = name_override
-	
+
 	if bl_obj.type == 'MESH':
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
-			uobj = UDActorMesh.new(**kwargs)
+			uobj = UDActorMesh(**kwargs)
 			umesh = collect_mesh(bl_obj.data, uscene)
 			uobj.mesh = umesh.name
 			for idx, slot in enumerate(bl_obj.material_slots):
@@ -237,17 +238,17 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 					uobj.materials[idx] = slot.material.name
 
 		else: # if is a mesh with no polys, treat as empty
-			uobj = UDActor.new(**kwargs)
+			uobj = UDActor(**kwargs)
 
 	elif bl_obj.type == 'CAMERA':
-		uobj = UDActorCamera.new(**kwargs)
+		uobj = UDActorCamera(**kwargs)
 		bl_cam = bl_obj.data
 		uobj.focal_length = bl_cam.lens
 		uobj.focus_distance = bl_cam.dof_distance
 		uobj.sensor_width = bl_cam.sensor_width
 
 	elif bl_obj.type == 'LIGHT':
-		uobj = UDActorLight.new(**kwargs)
+		uobj = UDActorLight(**kwargs)
 		bl_light = bl_obj.data
 
 		if bl_light.node_tree:
@@ -268,7 +269,7 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 			uobj.inner_cone_angle = angle - angle * bl_light.spot_blend
 
 	else: # maybe empties
-		uobj = UDActor.new(**kwargs)
+		uobj = UDActor(**kwargs)
 
 	mat_basis = bl_obj.matrix_world
 	if dupli_matrix:
@@ -284,37 +285,42 @@ def collect_object(bl_obj, uscene, context, parent = None, dupli_matrix=None, na
 	uobj.transform.loc = loc
 	uobj.transform.rot = rot
 	uobj.transform.scale = scale
-	
+
 	if bl_obj.instance_type == 'COLLECTION':
 		duplis = bl_obj.instance_collection.objects
 		for idx, dup in enumerate(duplis):
 			dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
-			collect_object(dup, uscene, parent=uobj, context=context, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
+			new_obj = collect_object(dup, uscene, context=context, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
+			uobj.objects[new_obj.name] = new_obj
 
 	if dupli_matrix is None: # this was for blender 2.7, maybe 2.8 works without this
 		for child in bl_obj.children:
-			collect_object(child, uscene, parent=uobj, context=context)
+			new_obj = collect_object(child, uscene, context=context)
+			uobj.objects[new_obj.name] = new_obj
+
+	return uobj
 
 def collect_to_uscene(context):
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
-	
+
 	uscene = UDScene()
 	UDScene.current_scene = uscene # FIXME
 	for obj in root_objects:
 		uobj = collect_object(obj, uscene, context=context)
+		uscene.objects[uobj.name] = uobj
 	return uscene
 
 def save(operator, context,*, filepath, **kwargs):
-	
+
 	from os import path
 	basepath, ext = path.splitext(filepath)
 	basedir, basename = path.split(basepath)
 	scene = collect_to_uscene(bpy.context)
-	scene.save(basedir, basename) 
+	scene.save(basedir, basename)
 	UDScene.current_scene = None # FIXME
 
 	return {'FINISHED'}
-	
+
 if __name__ == '__main__':
-	save(operator=None, context=bpy.context, filepath='C:\\Users\\boterock\\Desktop\\export.datasmith') 
+	save(operator=None, context=bpy.context, filepath='C:\\Users\\boterock\\Desktop\\export.datasmith')
