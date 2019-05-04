@@ -96,6 +96,15 @@ def make_field_node(field, name, default_name):
 			texture.image = image
 
 			return node
+		elif input_node.type == 'HUE_SAT':
+			return make_field_node(input_node.inputs['Color'], name, default_name)
+		elif input_node.type == 'MIX_RGB':
+			factor = input_node.inputs['Fac'].default_value
+			selected_input = 'Color1' if factor < 0.5 else 'Color2'
+			return make_field_node(input_node.inputs[selected_input], name, default_name)
+		elif input_node.type == 'RGB':
+			value = input_node.outputs[0]
+			return make_default_node(value, default_name)
 		else:
 			log.error("unhandled node")
 
