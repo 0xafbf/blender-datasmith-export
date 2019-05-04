@@ -6,7 +6,7 @@ format.
 You can see a brief overview of how it works here:
 https://youtu.be/bUUDqerdqAc
 
-To install, get the latest release and install from the blender addons
+To install, [get the latest release](https://github.com/0xafbf/blender-datasmith-export/releases) and install from the blender addons
 preferences pane.
 
 This is a work in progress, if you want to contribute to improve it, feel free
