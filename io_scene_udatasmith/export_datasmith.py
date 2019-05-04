@@ -1,3 +1,4 @@
+# Copyright Andrés Botero 2019
 
 import bpy
 import bmesh

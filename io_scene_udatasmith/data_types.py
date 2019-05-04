@@ -1,3 +1,5 @@
+# Copyright Andrés Botero 2019
+
 import struct
 from xml.etree import ElementTree
 import os
