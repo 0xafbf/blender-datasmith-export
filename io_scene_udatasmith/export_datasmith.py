@@ -173,7 +173,40 @@ def collect_materials(scene, materials):
 
 	return umats
 
+def exp_color(value):
+	return Node("Color", {
+		"Name": "",
+		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=%.6f)"%tuple(value)
+		})
+def exp_scalar(value):
+	return Node("Scalar", {
+		"Name": "",
+		"constant": "%f"%value
+		})
 
+def collect_pbr_material(material):
+	n = Node("UEPbrMaterial")
+	n['name'] = sanitize_name(material.name)
+	exp = Node("Expressions")
+	n.push(exp)
+
+	basecolor_idx = exp.push(exp_color(material.diffuse_color))
+	roughness_idx = exp.push(exp_scalar(material.roughness))
+	metallic_idx = exp.push(exp_scalar(material.metallic))
+	n.push(Node("BaseColor", {
+		"expression": basecolor_idx,
+		"OutputIndex": "0"
+		}))
+	n.push(Node("Roughness", {
+		"expression": roughness_idx,
+		"OutputIndex": "0"
+		}))
+	n.push(Node("Metallic", {
+		"expression": metallic_idx,
+		"OutputIndex": "0"
+		}))
+
+	return n
 
 
 def collect_mesh(bl_mesh, uscene):
@@ -206,8 +239,7 @@ def collect_mesh(bl_mesh, uscene):
 	m.calc_normals_split()
 
 
-	umats = collect_materials(uscene, bl_mesh.materials)
-	umesh.materials = [umat.name for umat in umats]
+	umesh.materials = [mat.name for mat in bl_mesh.materials]
 
 	#for idx, mat in enumerate(bl_mesh.materials):
 	#    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
@@ -237,6 +269,9 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		kwargs['name'] = name_override
 
 	if bl_obj.type == 'MESH':
+
+		uscene.materials |= {slot.material for slot in bl_obj.material_slots}
+
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
 			uobj = UDActorMesh(**kwargs)
@@ -244,8 +279,8 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			uobj.mesh = umesh.name
 			for idx, slot in enumerate(bl_obj.material_slots):
 				if slot.link == 'OBJECT':
-					collect_materials([slot.material], uscene)
-					uobj.materials[idx] = slot.material.name
+					#collect_materials([slot.material], uscene)
+					uobj.materials[idx] = sanitize_name(slot.material.name)
 
 		else: # if is a mesh with no polys, treat as empty
 			uobj = UDActor(**kwargs)
@@ -316,9 +351,14 @@ def collect_to_uscene(context):
 
 	uscene = UDScene()
 	UDScene.current_scene = uscene # FIXME
+	log.info("collecting objects")
 	for obj in root_objects:
 		uobj = collect_object(obj, uscene, context=context)
 		uscene.objects[uobj.name] = uobj
+	log.info("collecting materials")
+	uscene.material_nodes = [collect_pbr_material(mat) for mat in uscene.materials]
+
+
 	return uscene
 
 def save(operator, context,*, filepath, **kwargs):
@@ -326,8 +366,12 @@ def save(operator, context,*, filepath, **kwargs):
 	from os import path
 	basepath, ext = path.splitext(filepath)
 	basedir, basename = path.split(basepath)
+
+	log.info("Starting collection of scene")
 	scene = collect_to_uscene(bpy.context)
+	log.info("finished collecting, now saving")
 	scene.save(basedir, basename)
+
 	UDScene.current_scene = None # FIXME
 
 	return {'FINISHED'}

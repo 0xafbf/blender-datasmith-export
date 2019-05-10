@@ -109,7 +109,9 @@ class Node:
 	def __str__(self):
 		return self.string_rep()
 	def push(self, value):
+		size = len(self.children)
 		self.children.append(value)
+		return size
 
 
 def node_value(name, value):
@@ -535,7 +537,8 @@ class UDScene():
 	def __init__(self, source=None):
 		self.name = 'udscene_name'
 
-		self.materials = {}
+		self.materials = set()
+		self.material_nodes = []
 		self.meshes = {}
 		self.objects = {}
 		self.textures = {}
@@ -543,8 +546,6 @@ class UDScene():
 
 	def get_field(self, cls, name, **kwargs):
 		group = getattr(self, cls.node_group)
-		if not group:
-			log.error("trying to get invalid group")
 
 		if name in group:
 			return group[name]
@@ -573,8 +574,8 @@ class UDScene():
 			n.push(obj.node())
 		for name, mesh in self.meshes.items():
 			n.push(mesh.node())
-		for name, mat in self.materials.items():
-			n.push(mat.node())
+		for mat in self.material_nodes:
+			n.push(mat)
 		for name, tex in self.textures.items():
 			n.push(tex.node())
 

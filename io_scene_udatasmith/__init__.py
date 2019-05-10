@@ -50,15 +50,15 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
     filename_ext = ".udatasmith"
     filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
-    def draw(self, context):
-        layout = self.layout
+    # def draw(self, context):
+        # layout = self.layout
 
-        layout.prop(self, "version")
-        layout.prop(self, "use_selection")
-        layout.prop(self, "global_scale")
-        layout.prop(self, "include_metadata")
-        layout.prop(self, "embed_textures")
-        layout.prop(self, "batch_mode")
+        # layout.prop(self, "version")
+        # layout.prop(self, "use_selection")
+        # layout.prop(self, "global_scale")
+        # layout.prop(self, "include_metadata")
+        # layout.prop(self, "embed_textures")
+        # layout.prop(self, "batch_mode")
 
 
     def execute(self, context):
