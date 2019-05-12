@@ -217,7 +217,7 @@ class UDMesh():
 		n['label'] = self.name
 		n['name'] = self.name
 
-		for idx, m in enumerate(self.materials):
+		for idx, m in self.materials.items():
 			n.push(Node('Material', {'id':idx, 'name':m}))
 		if self.relative_path:
 			path = self.relative_path.replace('\\', '/')
@@ -239,76 +239,6 @@ class UDMesh():
 		self.hash = hash_md5.hexdigest()
 
 
-
-class UDMaterial():
-	node_type = 'Material'
-	node_group = 'materials'
-
-	def __init__(self, name: str, node=None, parent=None, **kwargs):
-		self.name = name
-		self.children = []
-	def node(self):
-		n = Node('Material')
-		n['name'] = self.name
-		for child in self.children:
-			n.push(child)
-		return n
-
-class UDShader():
-	node_type = 'Shader'
-	node_group = 'shaders'
-	shader_count = 0
-	def __init__(self):
-		self['name'] = "Shader_%d" % (UDShader.shader_count)
-		UDShader.shader_count += 1
-
-class UDMasterMaterial(UDMaterial):
-	def prop_color(value):
-		data = {
-			'prop_type': 'Color'
-		}
-		data['value'] = tuple(map(float, re.match(r"\(R=(-?[\d.]*),G=(-?[\d.]*),B=(-?[\d.]*),A=(-?[\d.]*)\)", src).groups()))
-		return data
-
-	def prop_bool(Prop):
-		data = {
-			'prop_type': 'Bool'
-		}
-		data['value'] = True if value == 'true' else False
-		return data
-
-	def prop_texture(value):
-		return {
-			'prop_type': 'Texture'
-		}
-
-	def prop_float(value):
-		return {
-			'prop_type': 'Float',
-			'value': float(value),
-		}
-
-	types = {
-		"Color": prop_color,
-		"Bool": prop_bool,
-		"Texture": prop_texture,
-		"Float": prop_float,
-	}
-
-	'''sketchup datasmith outputs Master material, it may be different'''
-	''' has params Type and Quality'''
-	node_type = 'MasterMaterial'
-	def __init__(self, *args, node=None, **kwargs):
-		super().__init__(*args, node=node, **kwargs)
-		self.properties = {}
-		if node is not None:
-			for prop in node.findall('KeyValueProperty'):
-				prop_name = prop.attrib['name']
-				prop_type = prop.attrib['type']
-
-				self.properties[name] = UDMasterMaterial.types[prop.attrib['type']](prop.attrib['val'])
-
-
 class UDTexture():
 	node_type = 'Texture'
 	node_group = 'textures'
@@ -321,12 +251,7 @@ class UDTexture():
 			self.texturemode = node.attrib['texturemode']
 
 	def abs_path(self):
-		ext = 'png'
-		if self.image:
-			if self.image.file_format == 'PNG':
-				pass
-				#ext = 'png'
-		return "{}/{}.{}".format(UDScene.current_scene.export_path, self.name, ext)
+		return "{}/{}".format(UDScene.current_scene.export_path, self.name)
 
 	def node(self):
 		n = Node('Texture')
@@ -556,8 +481,8 @@ class UDScene():
 
 	def node(self):
 		n = Node('DatasmithUnrealScene')
-		n.push(Node('Version', children=['0.20']))
-		n.push(Node('SDKVersion', children=['4.20E1']))
+		n.push(Node('Version', children=['0.22']))
+		n.push(Node('SDKVersion', children=['4.22E0']))
 		n.push(Node('Host', children=['Blender']))
 		n.push(Node('Application', {
 			'Vendor': 'Blender',

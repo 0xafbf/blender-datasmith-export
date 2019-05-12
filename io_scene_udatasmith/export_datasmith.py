@@ -4,7 +4,7 @@ import bpy
 import bmesh
 import math
 from io_scene_udatasmith.data_types import (
-	UDScene, UDActor, UDActorMesh, UDMaterial, UDMasterMaterial,
+	UDScene, UDActor, UDActorMesh,
 	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix
 
@@ -26,6 +26,18 @@ matrix_forward = Matrix((
 	(-1, 0, 0, 0),
 	(0, 0, 0, 1)
 ))
+
+
+def exp_color(value):
+	return Node("Color", {
+		"Name": "",
+		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=%.6f)"%tuple(value)
+		})
+def exp_scalar(value):
+	return Node("Scalar", {
+		"Name": "",
+		"constant": "%f"%value
+		})
 
 
 
@@ -111,22 +123,18 @@ def make_field_node(field, name, default_name):
 
 	return make_default_node(field, default_name)
 
-def make_ushader(base_name, mat_node=None):
+def make_ushader(mat_node):
 
 	shader = Node('Shader')
-	shader['name'] = base_name + '_0'
 	if not mat_node:
 		return shader
 
 	# TODO handle anything other than principled bsdf
-	if mat_node.type == 'MIX_SHADER':
-		pass
-	elif mat_node.type == 'BSDF_PRINCIPLED':
+	if mat_node.type == 'BSDF_PRINCIPLED':
 		inputs = mat_node.inputs
 
 		params = []
 		base_color = inputs['Base Color']
-		log.info("material name" + str(base_name))
 		log.info("base_color links:" + str(base_color.links))
 		params.append(make_field_node(base_color, 'Diffuse', 'Diffusecolor'))
 		params.append(make_field_node(inputs['IOR'], 'IOR', 'IOR'))
@@ -137,54 +145,109 @@ def make_ushader(base_name, mat_node=None):
 
 		shader.children = params
 
-	elif mat_node.type == 'BSDF_TRANSPARENT':
-		pass
 
 	return shader
 
+def exp_texcoord(index=0, u_tiling=1.0, v_tiling=1.0):
+	n = Node("TextureCoordinate")
+	n["Index"] = "0"
+	n["UTiling"] = u_tiling
+	n["VTiling"] = v_tiling
+	return n
+
+def exp_texture(path, tex_coord_exp):
+	n = Node("Texture")
+	n["Name"] = ""
+	n["PathName"] = path
+	n.push(Node("Coordinates", {
+		"expression": tex_coord_exp,
+		"OutputIndex": 0,
+		}))
+	return n
+
+def get_expression(field, exp_list):
+	if not field.links:
+		if field.type == 'VALUE':
+			return exp_list.push(exp_scalar(field.default_value))
+		elif field.type == 'RGBA':
+			return exp_list.push(exp_color(field.default_value))
+
+	from_node = field.links[0].from_node
+	if from_node.type == 'TEX_IMAGE':
+		tex_coord = exp_list.push(exp_texcoord())
+		image = from_node.image
+		name = sanitize_name(image.name) # name_full?
+
+		texture = UDScene.current_scene.get_field(UDTexture, name)
+		texture.image = image
+
+		texture_exp = exp_texture(name, tex_coord)
+		return exp_list.push(texture_exp)
+
+	return exp_list.push(exp_scalar(0))
+
+def pbr_nodetree_material(material):
+	n = Node("UEPbrMaterial")
+	n['name'] = sanitize_name(material.name)
+	exp = Node("Expressions")
+	n.push(exp)
+
+	output_node = material.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
+
+	# this might need a big refactoring, to handle all the possible cases
+	output_links = output_node.inputs['Surface'].links
+
+	if not output_links:
+		log.warn("material %s with use_nodes does not have nodes" % material.name)
+		return n
+
+	surface_node = output_links[0].from_node
+
+	if surface_node.type == 'BSDF_PRINCIPLED':
+		a = surface_node
+		basecolor_exp = get_expression(a.inputs['Base Color'], exp)
+		n.push(Node("BaseColor", {
+			"expression": basecolor_exp,
+			"OutputIndex": "0"
+		}))
+
+		metallic_exp = get_expression(a.inputs['Metallic'], exp)
+		n.push(Node("Metallic", {
+		"expression": metallic_exp,
+		"OutputIndex": "0"
+		}))
+
+		roughness_exp = get_expression(a.inputs['Roughness'], exp)
+		n.push(Node("Roughness", {
+			"expression": roughness_exp,
+			"OutputIndex": "0"
+		}))
+
+		if material.name == "Pear":
+			log.info("BSDF PEAR")
+			log.info(str(n))
+
+	return n
 
 
-def collect_materials(scene, materials):
-	umats = []
-	for mat in materials:
-		if not mat: # material may be none
-			continue
+def pbr_default_material():
+	n = Node("UEPbrMaterial")
+	n["name"] = "DefaultMaterial"
+	exp = Node("Expressions")
 
-		mat_name = sanitize_name(mat.name)
-		umat = scene.get_field(UDMaterial, mat_name)
-		umats.append(umat)
+	basecolor_idx = exp.push(exp_color((0.8, 0.8, 0.8, 1.0)))
+	roughness_idx = exp.push(exp_scalar(0.5))
+	n.push(Node("BaseColor", {
+		"expression": basecolor_idx,
+		"OutputIndex": "0"
+		}))
+	n.push(Node("Roughness", {
+		"expression": roughness_idx,
+		"OutputIndex": "0"
+		}))
+	return n
 
-		if not mat.node_tree:
-			umat.children = [make_basic_ushader(mat_name, mat)]
-			continue
-
-		log.debug(mat.name)
-		log.debug(umat.name)
-		output = mat.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
-
-		# this might need a big refactoring, to handle all the possible cases
-		output_links = output.inputs['Surface'].links
-
-		if output_links:
-			surface_input = output_links[0].from_node
-			umat.children = [make_ushader(mat_name, surface_input)]
-		else:
-			umat.children = [make_ushader(mat_name)]
-
-	return umats
-
-def exp_color(value):
-	return Node("Color", {
-		"Name": "",
-		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=%.6f)"%tuple(value)
-		})
-def exp_scalar(value):
-	return Node("Scalar", {
-		"Name": "",
-		"constant": "%f"%value
-		})
-
-def collect_pbr_material(material):
+def pbr_basic_material(material):
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp = Node("Expressions")
@@ -193,6 +256,8 @@ def collect_pbr_material(material):
 	basecolor_idx = exp.push(exp_color(material.diffuse_color))
 	roughness_idx = exp.push(exp_scalar(material.roughness))
 	metallic_idx = exp.push(exp_scalar(material.metallic))
+	specular_idx = exp.push(exp_scalar(material.specular_intensity))
+
 	n.push(Node("BaseColor", {
 		"expression": basecolor_idx,
 		"OutputIndex": "0"
@@ -205,9 +270,24 @@ def collect_pbr_material(material):
 		"expression": metallic_idx,
 		"OutputIndex": "0"
 		}))
+	n.push(Node("Specular", {
+		"expression": specular_idx,
+		"OutputIndex": "0"
+		}))
 
 	return n
 
+
+
+def collect_pbr_material(material):
+	if material is None:
+		log.debug("creating default material")
+		return pbr_default_material()
+	if not material.use_nodes:
+		log.debug("creating material %s without nodes" % material.name)
+		return pbr_basic_material(material)
+	log.debug("creating material %s with node_tree " % material.name)
+	return pbr_nodetree_material(material)
 
 def collect_mesh(bl_mesh, uscene):
 
@@ -239,10 +319,9 @@ def collect_mesh(bl_mesh, uscene):
 	m.calc_normals_split()
 
 
-	umesh.materials = [mat.name for mat in bl_mesh.materials]
 
-	#for idx, mat in enumerate(bl_mesh.materials):
-	#    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
+	for idx, mat in enumerate(bl_mesh.materials):
+	    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
 
 	umesh.tris_material_slot = [p.material_index for p in m.polygons]
 	umesh.tris_smoothing_group = [0 for p in m.polygons] # no smoothing groups for now
