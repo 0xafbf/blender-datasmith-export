@@ -165,6 +165,89 @@ def exp_texture(path, tex_coord_exp):
 		}))
 	return n
 
+# the operation options are:
+# 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'POWER', 'LOGARITHM',
+# 'SQRT', 'ABSOLUTE', 'MINIMUM', 'MAXIMUM', 'LESS_THAN',
+# 'GREATER_THAN', 'ROUND', 'FLOOR', 'CEIL', 'FRACT', 'MODULO', 'SINE',
+# 'COSINE', 'TANGENT', 'ARCSINE', 'ARCCOSINE', 'ARCTANGENT', 'ARCTAN2'
+op_map = {
+	'ADD': "Add",
+	'SUBTRACT': "Subtract",
+	'MULTIPLY': "Multiply",
+	'DIVIDE': "Divide",
+	'POWER': "Power",
+	'SQRT': "Sqrt",
+	'ABSOLUTE': "Abs",
+	'MINIMUM': "Min",
+	'MAXIMUM': "Max",
+}
+
+def exp_math(node, exp_list):
+	op = node.operation
+	n = Node(op_map[op])
+	if node.inputs[0].links:
+		exp_1 = get_expression(node.inputs[0], exp_list)
+		n.push(Node("0", {"expression": exp_1}))
+	else:
+		n.push(Node("0", {
+			"name": "constA",
+			"type": "Float",
+			"val": node.inputs[0].default_value
+		}))
+	if node.inputs[1].links:
+		exp_1 = get_expression(node.inputs[1], exp_list)
+		n.push(Node("1", {"expression": exp_1}))
+	else:
+		n.push(Node("1", {
+			"name": "constB",
+			"type": "Float",
+			"val": node.inputs[1].default_value
+		}))
+	# TODO: test in unreal if I have an expression with two imputs which
+	# one takes place, if it crashes or what
+	return exp_list.push(n)
+
+op_map2 = {
+	'OVERLAY': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Overlay",
+}
+
+def exp_mixrgb(node, exp_list):
+	op = node.blend_type
+	n = Node("FunctionCall", { "Function": op_map2[op]})
+	exp_1 = get_expression(node.inputs['Color1'], exp_list)
+	n.push(Node("0", {"expression": exp_1}))
+	exp_2 = get_expression(node.inputs['Color2'], exp_list)
+	n.push(Node("1", {"expression": exp_2}))
+
+	exp_blend = exp_list.push(n)
+
+	lerp = Node("LinearInterpolate")
+	lerp.push(Node("0", {"expression": exp_1}))
+	lerp.push(Node("1", {"expression": exp_blend}))
+	exp_fac = get_expression(node.inputs['Fac'], exp_list)
+	lerp.push(Node("2", {"expression": exp_fac}))
+
+	return exp_list.push(lerp)
+
+# TODO: this depends on having the material functions in UE4
+def exp_hsv(node, exp_list):
+	n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/AdjustHSV"})
+	exp_hue = get_expression(node.inputs['Hue'], exp_list)
+	n.push(Node("0", {"expression": exp_hue}))
+	exp_sat = get_expression(node.inputs['Saturation'], exp_list)
+	n.push(Node("1", {"expression": exp_sat}))
+	exp_value = get_expression(node.inputs['Value'], exp_list)
+	n.push(Node("2", {"expression": exp_value}))
+	exp_fac = get_expression(node.inputs['Fac'], exp_list)
+	n.push(Node("3", {"expression": exp_fac}))
+	exp_color = get_expression(node.inputs['Color'], exp_list)
+	n.push(Node("4", {"expression": exp_color}))
+	# TODO: test in unreal if I have an expression with two imputs which
+	# one takes place, if it crashes or what
+	return exp_list.push(n)
+
+
+
 def get_expression(field, exp_list):
 	if not field.links:
 		if field.type == 'VALUE':
@@ -174,7 +257,7 @@ def get_expression(field, exp_list):
 
 	from_node = field.links[0].from_node
 	if from_node.type == 'TEX_IMAGE':
-		tex_coord = exp_list.push(exp_texcoord())
+		tex_coord = exp_list.push(exp_texcoord()) # TODO: maybe not even needed?
 		image = from_node.image
 		name = sanitize_name(image.name) # name_full?
 
@@ -183,8 +266,57 @@ def get_expression(field, exp_list):
 
 		texture_exp = exp_texture(name, tex_coord)
 		return exp_list.push(texture_exp)
+	elif from_node.type == 'MATH':
+		return exp_math(from_node, exp_list)
+	elif from_node.type == 'MIX_RGB':
+		return exp_mixrgb(from_node, exp_list)
+	elif from_node.type == 'HUE_SAT':
+		return exp_hsv(from_node, exp_list)
+	elif from_node.type == 'ATTRIBUTE':
+		log.warn("unimplemented node ATTRIBUTE")
+		return exp_list.push(Node("VertexColor"))
+	elif from_node.type == 'RGB':
+		return exp_list.push(exp_color(from_node.outputs[0].default_value))
 
+	log.warn("node not handled" + from_node.type)
 	return exp_list.push(exp_scalar(0))
+
+
+def get_bsdf_expression(node, exp_list):
+	expressions = {}
+	if node.type == 'BSDF_PRINCIPLED':
+		expressions["BaseColor"] = get_expression(node.inputs['Base Color'], exp_list)
+		expressions["Metallic"] = get_expression(node.inputs['Metallic'], exp_list)
+		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
+	elif node.type == 'BSDF_DIFFUSE':
+		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
+		expressions["Roughness"] = exp_list.push(exp_scalar(1.0))
+	elif node.type == 'BSDF_GLOSSY':
+		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
+		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
+		expressions["Metallic"] = exp_list.push(exp_scalar(1.0))
+	elif node.type == 'BSDF_VELVET':
+		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
+		expressions["Roughness"] = exp_list.push(exp_scalar(1.0))
+		log.warn("BSDF_VELVET incomplete implementation")
+
+	elif node.type == 'ADD_SHADER':
+		expressions = get_bsdf_expression(node.inputs[0].links[0].from_node, exp_list)
+		expressions1 = get_bsdf_expression(node.inputs[1].links[0].from_node, exp_list)
+		for name, exp in expressions1.items():
+			if name in expressions:
+				n = Node("Add")
+				n.push(Node("0", {"expression": expressions[name]}))
+				n.push(Node("1", {"expression": exp}))
+				expressions[name] = exp_list.push(n)
+			else:
+				expressions[name] = exp
+	else:
+		log.warn("bsdf not handled" + node.type)
+
+	return expressions
+
+
 
 def pbr_nodetree_material(material):
 	n = Node("UEPbrMaterial")
@@ -203,29 +335,12 @@ def pbr_nodetree_material(material):
 
 	surface_node = output_links[0].from_node
 
-	if surface_node.type == 'BSDF_PRINCIPLED':
-		a = surface_node
-		basecolor_exp = get_expression(a.inputs['Base Color'], exp)
-		n.push(Node("BaseColor", {
-			"expression": basecolor_exp,
-			"OutputIndex": "0"
-		}))
-
-		metallic_exp = get_expression(a.inputs['Metallic'], exp)
-		n.push(Node("Metallic", {
-		"expression": metallic_exp,
+	expressions = get_bsdf_expression(surface_node, exp)
+	for key, value in expressions.items():
+		n.push(Node(key, {
+		"expression": value,
 		"OutputIndex": "0"
 		}))
-
-		roughness_exp = get_expression(a.inputs['Roughness'], exp)
-		n.push(Node("Roughness", {
-			"expression": roughness_exp,
-			"OutputIndex": "0"
-		}))
-
-		if material.name == "Pear":
-			log.info("BSDF PEAR")
-			log.info(str(n))
 
 	return n
 
@@ -331,12 +446,22 @@ def collect_mesh(bl_mesh, uscene):
 	umesh.triangles = [l.vertex_index for l in m.loops]
 	umesh.vertex_normals = [matrix_normals @ l.normal for l in m.loops] # don't know why, but copy is needed for this only
 	umesh.uvs = [fix_uv(m.uv_layers[0].data[l.index].uv.copy()) for l in m.loops]
-
+	if (m.vertex_colors):
+		umesh.vertex_colors = [color_uchar(m.vertex_colors[0].data[l.index].color) for l in m.loops]
 	bpy.data.meshes.remove(m)
 	return umesh
 
 def fix_uv(data):
 	return (data[0], 1-data[1])
+
+def color_uchar(data):
+	return (
+		int(data[0]*255),
+		int(data[1]*255),
+		int(data[2]*255),
+		int(data[3]*255),
+	)
+
 
 def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=None):
 

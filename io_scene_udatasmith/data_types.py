@@ -145,6 +145,7 @@ class UDMesh():
 		self.triangles = []
 		self.vertex_normals = []
 		self.uvs = []
+		self.vertex_colors = [] # In 0-255 range
 		self.relative_path = None
 		self.hash = ''
 
@@ -190,13 +191,16 @@ class UDMesh():
 			write_array_data(file, 'I', self.tris_material_slot)
 			write_array_data(file, 'I', self.tris_smoothing_group)
 			# per vertex
-			write_array_data(file, 'fff', self.vertices)
+			write_array_data(file, 'fff', self.vertices) # VertexPositions
 			# per vertexloop
-			write_array_data(file, 'I', self.triangles)
-			write_null(file, 8)
-			write_array_data(file, 'fff', self.vertex_normals)
-			write_array_data(file, 'ff', self.uvs)
-			write_null(file, 36)
+			write_array_data(file, 'I', self.triangles) # WedgeIndices
+			write_null(file, 4) # WedgeTangentX
+			write_null(file, 4) # WedgeTangentY
+			write_array_data(file, 'fff', self.vertex_normals) # WedgeTangentZ
+			write_array_data(file, 'ff', self.uvs) # WedgeTexCoords[0]
+			write_null(file, 4 * 7) # WedgeTexCoords[1..7]
+			write_array_data(file, 'BBBB', self.vertex_colors) # WedgeColors
+			write_null(file, 4) # MaterialIndexToImportIndex
 
 			#here ends rawmesh
 			mesh_end = file.tell()
@@ -525,14 +529,17 @@ class UDScene():
 
 		log.info("building XML tree")
 
-		tree = str(self.node())
-		from xml.dom import minidom
-		pretty_xml = minidom.parseString(tree).toprettyxml()
+		result = str(self.node())
+
+		pretty_print = False
+		if pretty_print:
+			from xml.dom import minidom
+			result = minidom.parseString(tree).toprettyxml()
 		#pretty_xml = tree
 
 		filename = path.join(basedir, self.name + '.udatasmith')
 		log.info("writing to file")
 		with open(filename, 'w') as f:
-			f.write(pretty_xml)
+			f.write(result)
 		log.info("export successful")
 
