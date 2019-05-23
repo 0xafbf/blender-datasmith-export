@@ -284,6 +284,7 @@ def get_expression(field, exp_list):
 
 def get_bsdf_expression(node, exp_list):
 	expressions = {}
+	#TODO: all the shaders are missing normal maps
 	if node.type == 'BSDF_PRINCIPLED':
 		expressions["BaseColor"] = get_expression(node.inputs['Base Color'], exp_list)
 		expressions["Metallic"] = get_expression(node.inputs['Metallic'], exp_list)
@@ -299,6 +300,18 @@ def get_bsdf_expression(node, exp_list):
 		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
 		expressions["Roughness"] = exp_list.push(exp_scalar(1.0))
 		log.warn("BSDF_VELVET incomplete implementation")
+	elif node.type == 'BSDF_TRANSPARENT':
+		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
+		expressions["Opacity"] = exp_list.push(exp_scalar(0.0))
+		expressions["Refraction"] = exp_list.push(exp_scalar(1.0))
+		log.warn("BSDF_TRANSPARENT incomplete implementation")
+	elif node.type == 'BSDF_GLASS':
+		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
+		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
+		expressions["Refraction"] = get_expression(node.inputs['IOR'], exp_list)
+
+		expressions["Opacity"] = exp_list.push(exp_scalar(0.0))
+		log.warn("BSDF_GLASS incomplete implementation")
 
 	elif node.type == 'ADD_SHADER':
 		expressions = get_bsdf_expression(node.inputs[0].links[0].from_node, exp_list)
@@ -308,6 +321,25 @@ def get_bsdf_expression(node, exp_list):
 				n = Node("Add")
 				n.push(Node("0", {"expression": expressions[name]}))
 				n.push(Node("1", {"expression": exp}))
+				expressions[name] = exp_list.push(n)
+			else:
+				expressions[name] = exp
+	elif node.type == 'MIX_SHADER':
+		expressions = get_bsdf_expression(node.inputs[1].links[0].from_node, exp_list)
+		expressions1 = get_bsdf_expression(node.inputs[2].links[0].from_node, exp_list)
+		if ("Opacity" in expressions) or ("Opacity" in expressions1):
+			# if there is opacity in any, both should have opacity
+			if "Opacity" not in expressions:
+				expressions["Opacity"] = exp_list.push(exp_scalar(1))
+			if "Opacity" not in expressions1:
+				expressions1["Opacity"] = exp_list.push(exp_scalar(1))
+		fac_expression = get_expression(node.inputs['Fac'], exp_list)
+		for name, exp in expressions1.items():
+			if name in expressions:
+				n = Node("LinearInterpolate")
+				n.push(Node("0", {"expression": expressions[name]}))
+				n.push(Node("1", {"expression": exp}))
+				n.push(Node("2", {"expression": fac_expression}))
 				expressions[name] = exp_list.push(n)
 			else:
 				expressions[name] = exp
@@ -341,6 +373,10 @@ def pbr_nodetree_material(material):
 		"expression": value,
 		"OutputIndex": "0"
 		}))
+
+	# apparently this happens automatically
+	#if "Opacity" in expressions:
+	#	n.push(Node("Blendmode", {"value": "2.0"}))
 
 	return n
 
