@@ -77,6 +77,7 @@ def f(x):
 
 
 class Node:
+	prefix = ""
 	def __init__(self, name, attrs=None, children=None):
 		self.name = name
 		self.children = children or []
@@ -88,22 +89,29 @@ class Node:
 	def __setitem__(self, key, value):
 		self.attrs[key] = value
 
-	def string_rep(self):
-		output = '<{}'.format(self.name)
+	def string_rep(self, first=False):
+		previous_prefix = Node.prefix
+		if first:
+			Node.prefix = ""
+		else:
+			Node.prefix += "\t"
+		output = Node.prefix + '<{}'.format(self.name)
+		if first:
+			Node.prefix = "\n"
 		for attr in self.attrs:
 			output += ' {key}="{value}"'.format(key=attr, value=self.attrs[attr])
 
-		if not self.children:
+		if self.children:
+			output += '>'
+			for child in self.children:
+				output += str(child)
+			if len(self.children) == 1 and type(self.children[0]) == str:
+				output += '</{}>'.format(self.name)
+			else:
+				output += Node.prefix + '</{}>'.format(self.name)
+		else:
 			output += '/>'
-			return output
-		output += '>'
-
-		for child in self.children:
-
-			output += str(child)
-
-		output += '</{}>'.format(self.name)
-
+		Node.prefix = previous_prefix
 		return output
 
 	def __str__(self):
@@ -529,7 +537,7 @@ class UDScene():
 
 		log.info("building XML tree")
 
-		result = str(self.node())
+		result = self.node().string_rep(first=True)
 
 		pretty_print = False
 		if pretty_print:
