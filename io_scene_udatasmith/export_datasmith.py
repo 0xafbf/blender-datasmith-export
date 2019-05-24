@@ -170,50 +170,99 @@ def exp_texture(path, tex_coord_exp):
 # 'SQRT', 'ABSOLUTE', 'MINIMUM', 'MAXIMUM', 'LESS_THAN',
 # 'GREATER_THAN', 'ROUND', 'FLOOR', 'CEIL', 'FRACT', 'MODULO', 'SINE',
 # 'COSINE', 'TANGENT', 'ARCSINE', 'ARCCOSINE', 'ARCTANGENT', 'ARCTAN2'
+
+# these map 1:1 with UE4 nodes:
 op_map = {
 	'ADD': "Add",
 	'SUBTRACT': "Subtract",
 	'MULTIPLY': "Multiply",
 	'DIVIDE': "Divide",
 	'POWER': "Power",
-	'SQRT': "Sqrt",
-	'ABSOLUTE': "Abs",
 	'MINIMUM': "Min",
 	'MAXIMUM': "Max",
+	'MODULO': "Fmod",
+	'ARCTAN2': "Arctangent2",
+}
+
+# these use only one input in UE4
+op_map_one_input = {
+	'SQRT': "SquareRoot",
+	'ABSOLUTE': "Abs",
+	'ROUND': "Round",
+	'FLOOR': "Floor",
+	'CEIL': "Ceil",
+	'FRACT': "Frac",
+	'SINE': "Sine",
+	'COSINE': "Cosine",
+	'TANGENT': "Tangent",
+	'ARCSINE': "Arcsine",
+	'ARCCOSINE': "Arccosine",
+	'ARCTANGENT': "Arctangent",
+}
+
+# these require specific implementations:
+op_map_custom = {
+	'LOGARITHM', # ue4 only has log2 and log10
+	'LESS_THAN', # use UE4 If node
+	'GREATER_THAN', # use UE4 If node
 }
 
 def exp_math(node, exp_list):
 	op = node.operation
-	n = Node(op_map[op])
-	if node.inputs[0].links:
-		exp_1 = get_expression(node.inputs[0], exp_list)
-		n.push(Node("0", {"expression": exp_1}))
-	else:
-		n.push(Node("0", {
-			"name": "constA",
-			"type": "Float",
-			"val": node.inputs[0].default_value
-		}))
-	if node.inputs[1].links:
+	n = None
+	if op in op_map:
+		n = Node(op_map[op])
+		exp_0 = get_expression(node.inputs[0], exp_list)
+		n.push(Node("0", {"expression": exp_0}))
 		exp_1 = get_expression(node.inputs[1], exp_list)
 		n.push(Node("1", {"expression": exp_1}))
-	else:
-		n.push(Node("1", {
-			"name": "constB",
-			"type": "Float",
-			"val": node.inputs[1].default_value
-		}))
-	# TODO: test in unreal if I have an expression with two imputs which
-	# one takes place, if it crashes or what
+	elif op in op_map_one_input:
+		n = Node(op_map_one_input[op])
+		exp = get_expression(node.inputs[0], exp_list)
+		n.push(Node("0", {"expression": exp}))
+	elif op in op_map_custom:
+		# all of these use two inputs
+		in_0 = get_expression(node.inputs[0], exp_list)
+		in_1 = get_expression(node.inputs[1], exp_list)
+		if op == 'LOGARITHM': # take two logarithms and divide
+			log0 = Node("Logarithm2")
+			log0.push(Node("0", {"expression": in_0}))
+			exp_0 = exp_list.push(log0)
+			log1 = Node("Logarithm2")
+			log1.push(Node("0", {"expression": in_1}))
+			exp_1 = exp_list.push(log1)
+			n = Node("Divide")
+			n.push(Node("0", {"expression": exp_0}))
+			n.push(Node("1", {"expression": exp_1}))
+		elif op == 'LESS_THAN':
+			n = Node("If")
+			one = exp_list.push(exp_scalar(1.0))
+			zero = exp_list.push(exp_scalar(0.0))
+			n.push(Node("0", {"expression": in_0})) # A
+			n.push(Node("1", {"expression": in_1})) # B
+			n.push(Node("2", {"expression": zero})) # A > B
+			n.push(Node("3", {"expression": one})) # A == B
+			n.push(Node("4", {"expression": one})) # A < B
+		elif op == 'GREATER_THAN':
+			n = Node("If")
+			one = exp_list.push(exp_scalar(1.0))
+			zero = exp_list.push(exp_scalar(0.0))
+			n.push(Node("0", {"expression": in_0})) # A
+			n.push(Node("1", {"expression": in_1})) # B
+			n.push(Node("2", {"expression": one})) # A > B
+			n.push(Node("3", {"expression": zero})) # A == B
+			n.push(Node("4", {"expression": zero})) # A < B
+
+	assert n, "unrecognized math operation: %s" % op
 	return exp_list.push(n)
 
-op_map2 = {
+op_map_color = {
 	'OVERLAY': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Overlay",
 }
 
 def exp_mixrgb(node, exp_list):
 	op = node.blend_type
-	n = Node("FunctionCall", { "Function": op_map2[op]})
+	n = Node("FunctionCall", { "Function": op_map_color[op]})
 	exp_1 = get_expression(node.inputs['Color1'], exp_list)
 	n.push(Node("0", {"expression": exp_1}))
 	exp_2 = get_expression(node.inputs['Color2'], exp_list)
@@ -256,6 +305,10 @@ def get_expression(field, exp_list):
 			return exp_list.push(exp_color(field.default_value))
 
 	from_node = field.links[0].from_node
+	if from_node in reverse_expressions:
+		return reverse_expressions[from_node]
+
+	return_exp = None
 	if from_node.type == 'TEX_IMAGE':
 		tex_coord = exp_list.push(exp_texcoord()) # TODO: maybe not even needed?
 		image = from_node.image
@@ -265,21 +318,32 @@ def get_expression(field, exp_list):
 		texture.image = image
 
 		texture_exp = exp_texture(name, tex_coord)
-		return exp_list.push(texture_exp)
+		return_exp = exp_list.push(texture_exp)
 	elif from_node.type == 'MATH':
-		return exp_math(from_node, exp_list)
+		return_exp = exp_math(from_node, exp_list)
 	elif from_node.type == 'MIX_RGB':
-		return exp_mixrgb(from_node, exp_list)
+		return_exp = exp_mixrgb(from_node, exp_list)
 	elif from_node.type == 'HUE_SAT':
-		return exp_hsv(from_node, exp_list)
+		return_exp = exp_hsv(from_node, exp_list)
 	elif from_node.type == 'ATTRIBUTE':
 		log.warn("unimplemented node ATTRIBUTE")
-		return exp_list.push(Node("VertexColor"))
+		return_exp = exp_list.push(Node("VertexColor"))
 	elif from_node.type == 'RGB':
-		return exp_list.push(exp_color(from_node.outputs[0].default_value))
+		return_exp = exp_list.push(exp_color(from_node.outputs[0].default_value))
+	# elif from_node.type == 'SEPRGB':
+	# 	pass
+	# elif from_node.type == 'COMBRGB':
+	# 	pass
+	else:
+		log.warn("node not handled" + from_node.type)
+		return_exp = exp_list.push(exp_scalar(0))
 
-	log.warn("node not handled" + from_node.type)
-	return exp_list.push(exp_scalar(0))
+	assert return_exp != None, "didn't get expression from node: %s" % from_node.type
+	reverse_expressions[from_node] = return_exp
+	return return_exp
+
+
+reverse_expressions = {}
 
 
 def get_bsdf_expression(node, exp_list):
@@ -348,8 +412,6 @@ def get_bsdf_expression(node, exp_list):
 
 	return expressions
 
-
-
 def pbr_nodetree_material(material):
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
@@ -367,6 +429,7 @@ def pbr_nodetree_material(material):
 
 	surface_node = output_links[0].from_node
 
+	reverse_expressions = dict()
 	expressions = get_bsdf_expression(surface_node, exp)
 	for key, value in expressions.items():
 		n.push(Node(key, {

@@ -255,12 +255,19 @@ class UDTexture():
 	node_type = 'Texture'
 	node_group = 'textures'
 
-	def __init__(self, *, node=None, name=None):
+	TEXTURE_MODE_DIFFUSE = "0"
+	TEXTURE_MODE_SPECULAR = "1"
+	TEXTURE_MODE_NORMAL = "2"
+	TEXTURE_MODE_NORMAL_GREEN_INV = "3"
+	TEXTURE_MODE_DISPLACE = "4"
+	TEXTURE_MODE_OTHER = "5"
+	TEXTURE_MODE_BUMP = "6"
+
+	def __init__(self, *, name=None):
 		self.name = name
 		self.image = None
-		if node:
-			self.folder, self.file = path.split(node.attrib['file'])
-			self.texturemode = node.attrib['texturemode']
+		self.texture_mode_hint = UDTexture.TEXTURE_MODE_OTHER
+
 
 	def abs_path(self):
 		return "{}/{}".format(UDScene.current_scene.export_path, self.name)
