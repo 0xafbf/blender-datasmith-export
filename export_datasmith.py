@@ -3,7 +3,7 @@
 import bpy
 import bmesh
 import math
-from io_scene_udatasmith.data_types import (
+from .data_types import (
 	UDScene, UDActor, UDActorMesh,
 	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix
@@ -592,7 +592,7 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		uobj = UDActorCamera(**kwargs)
 		bl_cam = bl_obj.data
 		uobj.focal_length = bl_cam.lens
-		uobj.focus_distance = bl_cam.dof_distance
+		uobj.focus_distance = bl_cam.dof.focus_distance
 		uobj.sensor_width = bl_cam.sensor_width
 
 	elif bl_obj.type == 'LIGHT':

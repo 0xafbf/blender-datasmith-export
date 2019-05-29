@@ -7,8 +7,7 @@ bl_info = {
     "location": "File > Export > Datasmith (.udatasmith)",
     "description": "Export scene as Datasmith asset",
     "warning": "",
-    "wiki_url": "http://wiki.blender.org/index.php/Extensions:2.6/Py/"
-                "Scripts/Import-Export/DSM",
+    "wiki_url": "https://github.com/0xafbf/blender-datasmith-export",
     "category": "Import-Export",
 }
 
