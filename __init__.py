@@ -1,91 +1,69 @@
 # Copyright Andrés Botero 2019
 
 bl_info = {
-    "name": "Unreal Datasmith format",
-    "author": "Andres Botero",
-    "blender": (2, 80, 0),
-    "location": "File > Export > Datasmith (.udatasmith)",
-    "description": "Export scene as Datasmith asset",
-    "warning": "",
-    "wiki_url": "https://github.com/0xafbf/blender-datasmith-export",
-    "category": "Import-Export",
+	"name": "Unreal Datasmith format",
+	"author": "Andrés Botero",
+	"version": (0, 1, 0),
+	"blender": (2, 80, 0),
+	"location": "File > Export > Datasmith (.udatasmith)",
+	"description": "Export scene as Datasmith asset",
+	"warning": "",
+	"category": "Import-Export",
+	"support": 'COMMUNITY',
+	"wiki_url": "https://github.com/0xafbf/blender-datasmith-export",
 }
 
-import logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
-# To support reload properly, try to access a package var,
-# if it's there, reload everything
 if "bpy" in locals():
-    import importlib
-    if "export_datasmith" in locals():
-        importlib.reload(export_datasmith)
-    if "import_datasmith" in locals():
-        importlib.reload(import_datasmith)
-
-
+	import importlib
+	if "export_datasmith" in locals():
+		importlib.reload(export_datasmith)
 
 import bpy
 from bpy.props import (
-        StringProperty,
-        BoolProperty,
-        FloatProperty,
-        EnumProperty,
-        )
+		StringProperty,
+		BoolProperty,
+		FloatProperty,
+		EnumProperty,
+		)
 from bpy_extras.io_utils import (
-        ImportHelper,
-        ExportHelper,
-        path_reference_mode,
-        axis_conversion,
-        )
+		ImportHelper,
+		ExportHelper,
+		path_reference_mode,
+		axis_conversion,
+		)
 
 class ExportDatasmith(bpy.types.Operator, ExportHelper):
-    """Write a Datasmith file"""
-    bl_idname = "export_scene.datasmith"
-    bl_label = "Export Datasmith"
-    bl_options = {'UNDO', 'PRESET'}
+	"""Write a Datasmith file"""
+	bl_idname = "export_scene.datasmith"
+	bl_label = "Export Datasmith"
+	bl_options = {'PRESET'}
 
-    filename_ext = ".udatasmith"
-    filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
+	filename_ext = ".udatasmith"
+	filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
-    # def draw(self, context):
-        # layout = self.layout
+	use_logging: BoolProperty(
+            name="Enable logging",
+            description="Enable logging to Window > System console",
+            default=False,
+            )
 
-        # layout.prop(self, "version")
-        # layout.prop(self, "use_selection")
-        # layout.prop(self, "global_scale")
-        # layout.prop(self, "include_metadata")
-        # layout.prop(self, "embed_textures")
-        # layout.prop(self, "batch_mode")
-
-
-    def execute(self, context):
-        keywords = self.as_keywords(ignore=("filter_glob",))
-        from . import export_datasmith
-        return export_datasmith.save(self, context, **keywords)
+	def execute(self, context):
+		keywords = self.as_keywords(ignore=("filter_glob",))
+		from . import export_datasmith
+		return export_datasmith.save(context, **keywords)
 
 def menu_func_export(self, context):
-    self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.udatasmith)")
-
-classes = (
-    ExportDatasmith,
-)
-
+	self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.udatasmith)")
 
 def register():
-    for cls in classes:
-        bpy.utils.register_class(cls)
-
-    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
-
+	bpy.utils.register_class(ExportDatasmith)
+	bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 def unregister():
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
-
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
+	bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
+	bpy.utils.unregister_class(ExportDatasmith)
 
 
 if __name__ == "__main__":
-    register()
+	register()

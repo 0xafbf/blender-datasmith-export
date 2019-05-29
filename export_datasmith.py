@@ -12,7 +12,6 @@ import logging
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
-
 matrix_datasmith = Matrix.Scale(100, 4)
 matrix_datasmith[1][1] *= -1.0
 
@@ -664,7 +663,17 @@ def collect_to_uscene(context):
 
 	return uscene
 
-def save(operator, context,*, filepath, **kwargs):
+def save(context,*, filepath, **kwargs):
+
+	use_logging = False
+	handler = None
+	if "use_logging" in kwargs:
+		use_logging = bool(kwargs["use_logging"])
+
+	if use_logging:
+		handler = logging.FileHandler(filepath + ".log", mode='w')
+		log.addHandler(handler)
+
 
 	from os import path
 	basepath, ext = path.splitext(filepath)
@@ -677,7 +686,9 @@ def save(operator, context,*, filepath, **kwargs):
 
 	UDScene.current_scene = None # FIXME
 
+	if use_logging:
+		handler.close()
+		log.removeHandler(handler)
+
 	return {'FINISHED'}
 
-if __name__ == '__main__':
-	save(operator=None, context=bpy.context, filepath='C:\\Users\\boterock\\Desktop\\export.datasmith')
