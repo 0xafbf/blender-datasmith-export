@@ -674,21 +674,27 @@ def save(context,*, filepath, **kwargs):
 		handler = logging.FileHandler(filepath + ".log", mode='w')
 		log.addHandler(handler)
 
+	try:
 
-	from os import path
-	basepath, ext = path.splitext(filepath)
-	basedir, basename = path.split(basepath)
+		from os import path
+		basepath, ext = path.splitext(filepath)
+		basedir, basename = path.split(basepath)
 
-	log.info("Starting collection of scene")
-	scene = collect_to_uscene(bpy.context)
-	log.info("finished collecting, now saving")
-	scene.save(basedir, basename)
+		log.info("Starting collection of scene")
+		scene = collect_to_uscene(bpy.context)
+		log.info("finished collecting, now saving")
+		scene.save(basedir, basename)
 
-	UDScene.current_scene = None # FIXME
+		UDScene.current_scene = None # FIXME
 
-	if use_logging:
-		handler.close()
-		log.removeHandler(handler)
+	except Exception as error:
+		log.error(error)
+		raise
+
+	finally:
+		if use_logging:
+			handler.close()
+			log.removeHandler(handler)
 
 	return {'FINISHED'}
 
