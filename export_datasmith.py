@@ -27,125 +27,19 @@ matrix_forward = Matrix((
 ))
 
 
-def exp_color(value):
-	return Node("Color", {
-		"Name": "",
+def exp_color(value, exp_list, name=""):
+	n = Node("Color", {
+		"Name": name,
 		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=%.6f)"%tuple(value)
 		})
-def exp_scalar(value):
-	return Node("Scalar", {
+	return exp_list.push(n)
+
+def exp_scalar(value, exp_list):
+	n = Node("Scalar", {
 		"Name": "",
 		"constant": "%f"%value
 		})
-
-
-
-
-def TexNode(type, texture):
-	return Node(type, {
-		'tex': texture,
-		'coordinate': 0,
-		'sx': 1.0,
-		'sy': 1.0,
-		'ox': 0.0,
-		'oy': 0.0,
-		'mx': 0,
-		'my': 0,
-		'rot': 0.0,
-		'mul': 1.0,
-		'channel': 0,
-		'inv': 0,
-		'cropped':0,
-
-	})
-
-def make_scalar_node(name, value, **kwargs):
-	return Node(name, attrs={'value': value, **kwargs})
-
-def make_rgba_node(name, color):
-	return Node(name, attrs={
-		'R': color[0],
-		'G': color[1],
-		'B': color[2],
-		'A': color[3],
-		})
-
-def make_basic_ushader(base_name, material):
-	shader = Node('Shader')
-	shader.children = [
-		make_rgba_node('Diffusecolor', material.diffuse_color),
-		make_scalar_node('Metalval', material.metallic),
-		make_scalar_node('Specularval', material.specular_intensity),
-		make_scalar_node('Roughnessval', material.roughness, desc='Roughness'),
-	]
-	return shader
-
-
-def make_default_node(field, name):
-	node = Node(name)
-	default = field.default_value
-	if field.type == 'VALUE':
-		node['value'] = "%.6f" % default
-	elif field.type == 'RGBA':
-		node['R'] = '%.6f' % default[0]
-		node['G'] = '%.6f' % default[1]
-		node['B'] = '%.6f' % default[2]
-		node['A'] = '%.6f' % default[3]
-
-	return node
-
-
-def make_field_node(field, name, default_name):
-	if field.links:
-		input_node = field.links[0].from_node
-		if input_node.type == 'TEX_IMAGE':
-			# if it is a texture
-			image = input_node.image
-			image_name = sanitize_name(image.name)
-			node = TexNode(name, image_name)
-			# also make sure that the scene has a reference to this texture
-			texture = UDScene.current_scene.get_field(UDTexture, image_name)
-			texture.image = image
-
-			return node
-		elif input_node.type == 'HUE_SAT':
-			return make_field_node(input_node.inputs['Color'], name, default_name)
-		elif input_node.type == 'MIX_RGB':
-			factor = input_node.inputs['Fac'].default_value
-			selected_input = 'Color1' if factor < 0.5 else 'Color2'
-			return make_field_node(input_node.inputs[selected_input], name, default_name)
-		elif input_node.type == 'RGB':
-			value = input_node.outputs[0]
-			return make_default_node(value, default_name)
-		else:
-			log.error("unhandled node")
-
-	return make_default_node(field, default_name)
-
-def make_ushader(mat_node):
-
-	shader = Node('Shader')
-	if not mat_node:
-		return shader
-
-	# TODO handle anything other than principled bsdf
-	if mat_node.type == 'BSDF_PRINCIPLED':
-		inputs = mat_node.inputs
-
-		params = []
-		base_color = inputs['Base Color']
-		log.info("base_color links:" + str(base_color.links))
-		params.append(make_field_node(base_color, 'Diffuse', 'Diffusecolor'))
-		params.append(make_field_node(inputs['IOR'], 'IOR', 'IOR'))
-		params.append(make_field_node(inputs['Metallic'], 'Metallic', 'Metalval'))
-		params.append(make_field_node(inputs['Roughness'], 'Roughness', 'Roughnessval'))
-		params.append(make_field_node(inputs['Specular'], 'Specular', 'Specularval'))
-
-
-		shader.children = params
-
-
-	return shader
+	return exp_list.push(n)
 
 def exp_texcoord(index=0, u_tiling=1.0, v_tiling=1.0):
 	n = Node("TextureCoordinate")
@@ -158,17 +52,8 @@ def exp_texture(path, tex_coord_exp):
 	n = Node("Texture")
 	n["Name"] = ""
 	n["PathName"] = path
-	n.push(Node("Coordinates", {
-		"expression": tex_coord_exp,
-		"OutputIndex": 0,
-		}))
+	n.push(Node("Coordinates", tex_coord_exp))
 	return n
-
-# the operation options are:
-# 'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE', 'POWER', 'LOGARITHM',
-# 'SQRT', 'ABSOLUTE', 'MINIMUM', 'MAXIMUM', 'LESS_THAN',
-# 'GREATER_THAN', 'ROUND', 'FLOOR', 'CEIL', 'FRACT', 'MODULO', 'SINE',
-# 'COSINE', 'TANGENT', 'ARCSINE', 'ARCCOSINE', 'ARCTANGENT', 'ARCTAN2'
 
 # these map 1:1 with UE4 nodes:
 op_map = {
@@ -212,45 +97,45 @@ def exp_math(node, exp_list):
 	if op in op_map:
 		n = Node(op_map[op])
 		exp_0 = get_expression(node.inputs[0], exp_list)
-		n.push(Node("0", {"expression": exp_0}))
+		n.push(Node("0", exp_0))
 		exp_1 = get_expression(node.inputs[1], exp_list)
-		n.push(Node("1", {"expression": exp_1}))
+		n.push(Node("1", exp_1))
 	elif op in op_map_one_input:
 		n = Node(op_map_one_input[op])
 		exp = get_expression(node.inputs[0], exp_list)
-		n.push(Node("0", {"expression": exp}))
+		n.push(Node("0", exp))
 	elif op in op_map_custom:
 		# all of these use two inputs
 		in_0 = get_expression(node.inputs[0], exp_list)
 		in_1 = get_expression(node.inputs[1], exp_list)
 		if op == 'LOGARITHM': # take two logarithms and divide
 			log0 = Node("Logarithm2")
-			log0.push(Node("0", {"expression": in_0}))
+			log0.push(Node("0", in_0))
 			exp_0 = exp_list.push(log0)
 			log1 = Node("Logarithm2")
-			log1.push(Node("0", {"expression": in_1}))
+			log1.push(Node("0", in_1))
 			exp_1 = exp_list.push(log1)
 			n = Node("Divide")
 			n.push(Node("0", {"expression": exp_0}))
 			n.push(Node("1", {"expression": exp_1}))
 		elif op == 'LESS_THAN':
 			n = Node("If")
-			one = exp_list.push(exp_scalar(1.0))
-			zero = exp_list.push(exp_scalar(0.0))
-			n.push(Node("0", {"expression": in_0})) # A
-			n.push(Node("1", {"expression": in_1})) # B
-			n.push(Node("2", {"expression": zero})) # A > B
-			n.push(Node("3", {"expression": one})) # A == B
-			n.push(Node("4", {"expression": one})) # A < B
+			one = {"expression": exp_scalar(1.0, exp_list)}
+			zero = {"expression": exp_scalar(0.0, exp_list)}
+			n.push(Node("0", in_0)) # A
+			n.push(Node("1", in_1)) # B
+			n.push(Node("2", zero)) # A > B
+			n.push(Node("3", one)) # A == B
+			n.push(Node("4", one)) # A < B
 		elif op == 'GREATER_THAN':
 			n = Node("If")
-			one = exp_list.push(exp_scalar(1.0))
-			zero = exp_list.push(exp_scalar(0.0))
-			n.push(Node("0", {"expression": in_0})) # A
-			n.push(Node("1", {"expression": in_1})) # B
-			n.push(Node("2", {"expression": one})) # A > B
-			n.push(Node("3", {"expression": zero})) # A == B
-			n.push(Node("4", {"expression": zero})) # A < B
+			one = exp_scalar(1.0, exp_list)
+			zero = exp_scalar(0.0, exp_list)
+			n.push(Node("0", in_0)) # A
+			n.push(Node("1", in_1)) # B
+			n.push(Node("2", one)) # A > B
+			n.push(Node("3", zero)) # A == B
+			n.push(Node("4", zero)) # A < B
 
 	assert n, "unrecognized math operation: %s" % op
 	return exp_list.push(n)
@@ -263,17 +148,17 @@ def exp_mixrgb(node, exp_list):
 	op = node.blend_type
 	n = Node("FunctionCall", { "Function": op_map_color[op]})
 	exp_1 = get_expression(node.inputs['Color1'], exp_list)
-	n.push(Node("0", {"expression": exp_1}))
+	n.push(Node("0", exp_1))
 	exp_2 = get_expression(node.inputs['Color2'], exp_list)
-	n.push(Node("1", {"expression": exp_2}))
+	n.push(Node("1", exp_2))
 
-	exp_blend = exp_list.push(n)
+	exp_blend = {"expression": exp_list.push(n)}
 
 	lerp = Node("LinearInterpolate")
-	lerp.push(Node("0", {"expression": exp_1}))
-	lerp.push(Node("1", {"expression": exp_blend}))
+	lerp.push(Node("0", exp_1))
+	lerp.push(Node("1", exp_blend))
 	exp_fac = get_expression(node.inputs['Fac'], exp_list)
-	lerp.push(Node("2", {"expression": exp_fac}))
+	lerp.push(Node("2", exp_fac))
 
 	return exp_list.push(lerp)
 
@@ -281,160 +166,320 @@ def exp_mixrgb(node, exp_list):
 def exp_hsv(node, exp_list):
 	n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/AdjustHSV"})
 	exp_hue = get_expression(node.inputs['Hue'], exp_list)
-	n.push(Node("0", {"expression": exp_hue}))
+	n.push(Node("0", exp_hue))
 	exp_sat = get_expression(node.inputs['Saturation'], exp_list)
-	n.push(Node("1", {"expression": exp_sat}))
+	n.push(Node("1", exp_sat))
 	exp_value = get_expression(node.inputs['Value'], exp_list)
-	n.push(Node("2", {"expression": exp_value}))
+	n.push(Node("2", exp_value))
 	exp_fac = get_expression(node.inputs['Fac'], exp_list)
-	n.push(Node("3", {"expression": exp_fac}))
+	n.push(Node("3", exp_fac))
 	exp_color = get_expression(node.inputs['Color'], exp_list)
-	n.push(Node("4", {"expression": exp_color}))
+	n.push(Node("4", exp_color))
 	# TODO: test in unreal if I have an expression with two imputs which
 	# one takes place, if it crashes or what
 	return exp_list.push(n)
 
+def exp_layer_weight(socket, exp_list):
+	exp_blend = get_expression(socket.node.inputs['Blend'], exp_list)
+	if socket.name == "Fresnel":
+		n = Node("Fresnel")
+		n.push(Node("0", exp_blend))
+		return exp_list.push(n)
+	elif socket.name == "Facing":
+		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/Facing"})
+		n.push(Node("0", exp_blend))
+		return exp_list.push(n)
+
+	log.error("unhandled socket from LAYER_WEIGHT node.")
+	return exp_blend
 
 
-def get_expression(field, exp_list):
-	if not field.links:
-		if field.type == 'VALUE':
-			return exp_list.push(exp_scalar(field.default_value))
-		elif field.type == 'RGBA':
-			return exp_list.push(exp_color(field.default_value))
+def exp_color_ramp(from_node, exp_list):
+	ramp = from_node.color_ramp
+	values = [ramp.evaluate(idx/255) for idx in range(256)]
 
-	from_node = field.links[0].from_node
-	if from_node in reverse_expressions:
-		return reverse_expressions[from_node]
+	idx = len(curve_list)
+	curve_list.append(values)
+	log.warn("new curve" + str(idx))
 
-	return_exp = None
-	if from_node.type == 'TEX_IMAGE':
-		tex_coord = exp_list.push(exp_texcoord()) # TODO: maybe not even needed?
-		image = from_node.image
-		name = sanitize_name(image.name) # name_full?
+	level = get_expression(from_node.inputs['Fac'], exp_list)
 
-		texture = UDScene.current_scene.get_field(UDTexture, name)
-		texture.image = image
+	curve_idx = exp_scalar(idx, exp_list)
+	pixel_offset = exp_scalar(0.5, exp_list)
+	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	n = Node("Add")
+	n.push(Node("0", {"expression": curve_idx}))
+	n.push(Node("1", {"expression": pixel_offset}))
+	curve_y = exp_list.push(n)
+	n2 = Node("Multiply")
+	n2.push(Node("0", {"expression": curve_y}))
+	n2.push(Node("1", {"expression": vertical_res}))
+	curve_v = exp_list.push(n2)
 
-		texture_exp = exp_texture(name, tex_coord)
-		return_exp = exp_list.push(texture_exp)
-	elif from_node.type == 'MATH':
-		return_exp = exp_math(from_node, exp_list)
-	elif from_node.type == 'MIX_RGB':
-		return_exp = exp_mixrgb(from_node, exp_list)
-	elif from_node.type == 'HUE_SAT':
-		return_exp = exp_hsv(from_node, exp_list)
-	elif from_node.type == 'ATTRIBUTE':
-		log.warn("unimplemented node ATTRIBUTE")
-		return_exp = exp_list.push(Node("VertexColor"))
-	elif from_node.type == 'RGB':
-		return_exp = exp_list.push(exp_color(from_node.outputs[0].default_value))
-	# elif from_node.type == 'SEPRGB':
-	# 	pass
-	# elif from_node.type == 'COMBRGB':
-	# 	pass
-	else:
-		log.warn("node not handled" + from_node.type)
-		return_exp = exp_list.push(exp_scalar(0))
+	n3 = Node("AppendVector")
+	n3.push(Node("0", {"expression": level}))
+	n3.push(Node("1", {"expression": curve_v}))
+	tex_coord = exp_list.push(n3)
 
-	assert return_exp != None, "didn't get expression from node: %s" % from_node.type
-	reverse_expressions[from_node] = return_exp
-	return return_exp
+	texture_exp = exp_texture("datasmith_curves", {"expression":tex_coord})
+	return exp_list.push(texture_exp)
 
 
 reverse_expressions = {}
 
+def get_expression(field, exp_list):
+	if not field.links:
+		if field.type == 'VALUE':
+			exp = exp_scalar(field.default_value, exp_list)
+			return {"expression": exp, "OutputIndex": 0}
+		elif field.type == 'RGBA':
+			exp = exp_color(field.default_value, exp_list)
+			return {"expression": exp, "OutputIndex": 0}
+		else:
+			log.error("there is no default for field type " + field.type)
 
-def get_bsdf_expression(node, exp_list):
-	expressions = {}
-	#TODO: all the shaders are missing normal maps
+	return_exp = get_expression_inner(field, exp_list)
+
+	if not return_exp:
+		log.error("didn't get expression from node: %s" % from_node.type)
+		exp = exp_scalar(0, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+	socket = field.links[0].from_socket
+	reverse_expressions[socket] = return_exp
+	return return_exp
+
+def get_expression_inner(field, exp_list):
+
+	node = field.links[0].from_node
+	socket = field.links[0].from_socket
+
+	# if this node is already exported, connect to that instead
+	if socket in reverse_expressions:
+		return reverse_expressions[socket]
+
+	# The cases are ordered like in blender Add menu, but shaders are first
+	# TODO: all the shaders are missing normal maps
+
+	# Shader nodes return a dictionary
 	if node.type == 'BSDF_PRINCIPLED':
-		expressions["BaseColor"] = get_expression(node.inputs['Base Color'], exp_list)
-		expressions["Metallic"] = get_expression(node.inputs['Metallic'], exp_list)
-		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
-	elif node.type == 'BSDF_DIFFUSE':
-		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
-		expressions["Roughness"] = exp_list.push(exp_scalar(1.0))
-	elif node.type == 'BSDF_GLOSSY':
-		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
-		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
-		expressions["Metallic"] = exp_list.push(exp_scalar(1.0))
-	elif node.type == 'BSDF_VELVET':
-		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
-		expressions["Roughness"] = exp_list.push(exp_scalar(1.0))
+		return {
+			"BaseColor": get_expression(node.inputs['Base Color'], exp_list),
+			"Metallic": get_expression(node.inputs['Metallic'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+		}
+	if node.type == 'BSDF_DIFFUSE':
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+		}
+	if node.type == 'BSDF_GLOSSY':
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			"Metallic": {"expression": exp_scalar(1.0, exp_list)},
+		}
+	if node.type == 'BSDF_VELVET':
 		log.warn("BSDF_VELVET incomplete implementation")
-	elif node.type == 'BSDF_TRANSPARENT':
-		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
-		expressions["Opacity"] = exp_list.push(exp_scalar(0.0))
-		expressions["Refraction"] = exp_list.push(exp_scalar(1.0))
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+		}
+	if node.type == 'BSDF_TRANSPARENT':
 		log.warn("BSDF_TRANSPARENT incomplete implementation")
-	elif node.type == 'BSDF_GLASS':
-		expressions["BaseColor"] = get_expression(node.inputs['Color'], exp_list)
-		expressions["Roughness"] = get_expression(node.inputs['Roughness'], exp_list)
-		expressions["Refraction"] = get_expression(node.inputs['IOR'], exp_list)
-
-		expressions["Opacity"] = exp_list.push(exp_scalar(0.0))
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Refraction": {"expression": exp_scalar(1.0, exp_list)},
+			"Opacity": {"expression": exp_scalar(0.0, exp_list)},
+		}
+	if node.type == 'BSDF_GLASS':
 		log.warn("BSDF_GLASS incomplete implementation")
-
-	elif node.type == 'ADD_SHADER':
-		expressions = get_bsdf_expression(node.inputs[0].links[0].from_node, exp_list)
-		expressions1 = get_bsdf_expression(node.inputs[1].links[0].from_node, exp_list)
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			"Refraction": get_expression(node.inputs['Refraction'], exp_list),
+			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	if node.type == 'ADD_SHADER':
+		expressions = get_expression(node.inputs[0], exp_list)
+		expressions1 = get_expression(node.inputs[1], exp_list)
 		for name, exp in expressions1.items():
 			if name in expressions:
 				n = Node("Add")
-				n.push(Node("0", {"expression": expressions[name]}))
-				n.push(Node("1", {"expression": exp}))
-				expressions[name] = exp_list.push(n)
+				n.push(Node("0", expressions[name]))
+				n.push(Node("1", exp))
+				expressions[name] = {"expression":exp_list.push(n)}
 			else:
 				expressions[name] = exp
-	elif node.type == 'MIX_SHADER':
-		expressions = get_bsdf_expression(node.inputs[1].links[0].from_node, exp_list)
-		expressions1 = get_bsdf_expression(node.inputs[2].links[0].from_node, exp_list)
+		return expressions
+	if node.type == 'MIX_SHADER':
+		expressions = get_expression(node.inputs[1], exp_list)
+		expressions1 = get_expression(node.inputs[2], exp_list)
 		if ("Opacity" in expressions) or ("Opacity" in expressions1):
 			# if there is opacity in any, both should have opacity
 			if "Opacity" not in expressions:
-				expressions["Opacity"] = exp_list.push(exp_scalar(1))
+				expressions["Opacity"] = {"expression": exp_scalar(1, exp_list)}
 			if "Opacity" not in expressions1:
-				expressions1["Opacity"] = exp_list.push(exp_scalar(1))
+				expressions1["Opacity"] = {"expression": exp_scalar(1, exp_list)}
 		fac_expression = get_expression(node.inputs['Fac'], exp_list)
 		for name, exp in expressions1.items():
 			if name in expressions:
 				n = Node("LinearInterpolate")
-				n.push(Node("0", {"expression": expressions[name]}))
-				n.push(Node("1", {"expression": exp}))
-				n.push(Node("2", {"expression": fac_expression}))
-				expressions[name] = exp_list.push(n)
+				n.push(Node("0", expressions[name]))
+				n.push(Node("1", exp))
+				n.push(Node("2", fac_expression))
+				expressions[name] = {"expression":exp_list.push(n)}
 			else:
 				expressions[name] = exp
-	else:
-		log.warn("bsdf not handled" + node.type)
+		return expressions
 
-	return expressions
+	# from here the return type should be {expression:node_idx, OutputIndex: socket_idx}
+	# Add > Input
+
+	# if node.type == 'AMBIENT_OCCLUSION':
+	if node.type == 'ATTRIBUTE':
+		log.warn("incomplete node ATTRIBUTE")
+		exp = exp_list.push(Node("VertexColor"))
+		return {"expression": exp, "OutputIndex": 0}
+	# if node.type == 'BEVEL':
+	# if node.type == 'CAMERA':
+	# if node.type == 'FRESNEL':
+	# if node.type == 'NEW_GEOMETRY':
+	# if node.type == 'HAIR_INFO':
+	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
+		exp = exp_layer_weight(socket, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+	# if node.type == 'LIGHT_PATH':
+	# if node.type == 'OBJECT_INFO':
+	# if node.type == 'PARTICLE_INFO':
+
+	if node.type == 'RGB':
+		exp = exp_color(node.outputs[0].default_value, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+
+	# if node.type == 'TANGENT':
+	# if node.type == 'TEX_COORD':
+	# if node.type == 'UVMAP':
+	# if node.type == 'VALUE':
+	# if node.type == 'WIREFRAME':
+
+
+	# Add > Texture
+	# if node.type == 'TEX_BRICK':
+	# if node.type == 'TEX_CHECKER':
+	# if node.type == 'TEX_ENVIRONMENT':
+	# if node.type == 'TEX_GRADIENT':
+	# if node.type == 'TEX_IES':
+	if node.type == 'TEX_IMAGE':
+		cached_node = None
+		if node in reverse_expressions:
+			cached_node = reverse_expressions[node]
+
+		if not cached_node:
+			tex_coord = exp_list.push(exp_texcoord()) # TODO: maybe not even needed?
+			image = node.image
+			name = sanitize_name(image.name) # name_full?
+
+			texture = UDScene.current_scene.get_field(UDTexture, name)
+			texture.image = image
+
+			texture_exp = exp_texture(name, {"expression":tex_coord})
+			cached_node = exp_list.push(texture_exp)
+			reverse_expressions[node] = cached_node
+
+		output_index = 0 # RGB
+		# indices 1, 2, 3 are separate RGB channels
+		if socket.name == 'Alpha':
+			output_index = 4 #
+
+		return { "expression": cached_node, "OutputIndex": output_index }
+
+
+	# Add > Color
+	# if node.type == 'BRIGHTCONTRAST':
+	# if node.type == 'GAMMA':
+	if node.type == 'HUE_SAT':
+		exp = exp_hsv(node, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+
+	# if node.type == 'INVERT':
+	# if node.type == 'LIGHT_FALLOFF':
+	# if node.type == 'TEX_CHECKER':
+	# if node.type == 'TEX_CHECKER':
+
+	if node.type == 'MIX_RGB':
+		exp = exp_mixrgb(node, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+
+	# if node.type == 'CURVE_RGB':
+
+
+	# Add > Vector
+
+	# if node.type == 'BUMP':
+	# if node.type == 'DISPLACEMENT':
+	# if node.type == 'MAPPING':
+	# if node.type == 'NORMAL':
+	# if node.type == 'NORMAL_MAP':
+	# if node.type == 'CURVE_VEC':
+	# if node.type == 'VECTOR_DISPLACEMENT':
+	# if node.type == 'VECT_TRANSFORM':
+
+	# Add > Converter
+
+	# if node.type == 'BLACKBODY':
+	if node.type == 'VALTORGB':
+		exp = exp_color_ramp(node, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+
+	# if node.type == 'COMBHSV':
+	# if node.type == 'COMBRGB':
+	# if node.type == 'COMBXYZ':
+	if node.type == 'MATH':
+		exp = exp_math(node, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
+
+	# if node.type == 'RGBTOBW':
+	# if node.type == 'SEPHSV':
+	# if node.type == 'SEPRGB':
+	# if node.type == 'SEPXYZ':
+	# if node.type == 'SHADERTORGB':
+	# if node.type == 'VECT_MATH':
+	# if node.type == 'WAVELENGTH':
+
+	# Others:
+
+	# if node.type == 'SCRIPT':
+	# if node.type == 'GROUP':
+
+
+	log.warn("node not handled" + node.type)
+	exp = exp_scalar(0, exp_list)
+	return {"expression": exp}
+
 
 def pbr_nodetree_material(material):
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
-	exp = Node("Expressions")
-	n.push(exp)
+	exp_list = Node("Expressions")
+	n.push(exp_list)
 
-	output_node = material.node_tree.get_output_node('EEVEE') # this could be 'CYCLES' or 'ALL'
+	output_node = (
+		material.node_tree.get_output_node('EEVEE')
+		or material.node_tree.get_output_node('ALL')
+		or material.node_tree.get_output_node('CYCLES')
+	)
 
-	# this might need a big refactoring, to handle all the possible cases
-	output_links = output_node.inputs['Surface'].links
+	global reverse_expressions
+	reverse_expressions = dict()
 
-	if not output_links:
+	surface_field = output_node.inputs['Surface']
+	if not surface_field.links:
 		log.warn("material %s with use_nodes does not have nodes" % material.name)
 		return n
 
-	surface_node = output_links[0].from_node
-
-	reverse_expressions = dict()
-	expressions = get_bsdf_expression(surface_node, exp)
+	expressions = get_expression(surface_field, exp_list)
 	for key, value in expressions.items():
-		n.push(Node(key, {
-		"expression": value,
-		"OutputIndex": "0"
-		}))
+		n.push(Node(key, value))
 
 	# apparently this happens automatically
 	#if "Opacity" in expressions:
@@ -446,10 +491,10 @@ def pbr_nodetree_material(material):
 def pbr_default_material():
 	n = Node("UEPbrMaterial")
 	n["name"] = "DefaultMaterial"
-	exp = Node("Expressions")
+	exp_list = Node("Expressions")
 
-	basecolor_idx = exp.push(exp_color((0.8, 0.8, 0.8, 1.0)))
-	roughness_idx = exp.push(exp_scalar(0.5))
+	basecolor_idx = exp_color((0.8, 0.8, 0.8, 1.0), exp_list)
+	roughness_idx = exp_scalar(0.5, exp_list)
 	n.push(Node("BaseColor", {
 		"expression": basecolor_idx,
 		"OutputIndex": "0"
@@ -463,13 +508,13 @@ def pbr_default_material():
 def pbr_basic_material(material):
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
-	exp = Node("Expressions")
+	exp_list = Node("Expressions")
 	n.push(exp)
 
-	basecolor_idx = exp.push(exp_color(material.diffuse_color))
-	roughness_idx = exp.push(exp_scalar(material.roughness))
-	metallic_idx = exp.push(exp_scalar(material.metallic))
-	specular_idx = exp.push(exp_scalar(material.specular_intensity))
+	basecolor_idx = exp_color(material.diffuse_color, exp_list)
+	roughness_idx = exp_scalar(material.roughness, exp_list)
+	metallic_idx = exp_scalar(material.metallic, exp_list)
+	specular_idx = exp_scalar(material.specular_intensity, exp_list)
 
 	n.push(Node("BaseColor", {
 		"expression": basecolor_idx,
@@ -647,6 +692,9 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 
 	return uobj
 
+
+
+curve_list = []
 def collect_to_uscene(context):
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
@@ -657,9 +705,30 @@ def collect_to_uscene(context):
 	for obj in root_objects:
 		uobj = collect_object(obj, uscene, context=context)
 		uscene.objects[uobj.name] = uobj
+
+	global curve_list
+	curve_list = []
 	log.info("collecting materials")
 	uscene.material_nodes = [collect_pbr_material(mat) for mat in uscene.materials]
 
+	log.info("baking curves")
+	log.info("curves: "+str(len(curve_list)))
+	curves_image = None
+	if "datasmith_curves" in bpy.data.images:
+		curves_image = bpy.data.images["datasmith_curves"]
+	else:
+		curves_image = bpy.data.images.new("datasmith_curves", 256, 256, alpha=True, float_buffer=True)
+		curves_image.colorspace_settings.is_data = True
+
+	pixels = curves_image.pixels
+	for idx, curve in enumerate(curve_list):
+		row_idx = (255-idx) * 256
+		for i in range(256):
+			pixel_idx = (row_idx + i) * 4
+			pixels[pixel_idx:pixel_idx+4] = curve[i]
+
+	texture = UDScene.current_scene.get_field(UDTexture, "datasmith_curves")
+	texture.image = curves_image
 
 	return uscene
 

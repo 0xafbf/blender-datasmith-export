@@ -81,6 +81,8 @@ class Node:
 	def __init__(self, name, attrs=None, children=None):
 		self.name = name
 		self.children = children or []
+		if attrs:
+			assert type(attrs) is dict
 		self.attrs = attrs or {}
 
 	def __getitem__(self, key):
@@ -266,27 +268,36 @@ class UDTexture():
 	def __init__(self, *, name=None):
 		self.name = name
 		self.image = None
-		self.texture_mode_hint = UDTexture.TEXTURE_MODE_OTHER
-
+		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 
 	def abs_path(self):
-		return "{}/{}".format(UDScene.current_scene.export_path, self.name)
+		safe_name = sanitize_name(self.name)
+		return "{}/{}.png".format(UDScene.current_scene.export_path, safe_name)
 
 	def node(self):
 		n = Node('Texture')
 		n['name'] = self.name
 		n['file'] = self.abs_path()
 		n['rgbcurve'] = 1.0
-		n['texturemode'] = '5'
+
+		if self.image.colorspace_settings.is_data:
+			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
+		else:
+			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
+
+
+		n['texturemode'] = self.texture_mode
 		n.push(Node('Hash', {'value': self.hash}))
 		return n
 
 	def save(self):
 		image_path = path.join(UDScene.current_scene.basedir, self.abs_path())
-		old_path = self.image.filepath
-		self.image.filepath = image_path
+		old_path = self.image.filepath_raw
+		self.image.file_format = 'PNG'
+		self.image.filepath_raw = image_path
 		self.image.save()
-		self.image.filepath = old_path
+		if old_path:
+			self.image.filepath_raw = old_path
 		import hashlib
 		hash_md5 = hashlib.md5()
 		with open(image_path, "rb") as f:
