@@ -263,7 +263,7 @@ class UDTexture():
 	TEXTURE_MODE_NORMAL_GREEN_INV = "3"
 	TEXTURE_MODE_DISPLACE = "4"
 	TEXTURE_MODE_OTHER = "5"
-	TEXTURE_MODE_BUMP = "6"
+	TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
 
 	def __init__(self, *, name=None):
 		self.name = name
@@ -278,10 +278,12 @@ class UDTexture():
 		n = Node('Texture')
 		n['name'] = self.name
 		n['file'] = self.abs_path()
-		n['rgbcurve'] = 1.0
+		n['rgbcurve'] = 0.0
 
+		# FIXME: Find a way to tell unreal to read as non-srgb
 		if self.image.colorspace_settings.is_data:
 			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
+			n['rgbcurve'] = "0.454545"
 		else:
 			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
 

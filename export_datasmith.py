@@ -41,12 +41,12 @@ def exp_scalar(value, exp_list):
 		})
 	return exp_list.push(n)
 
-def exp_texcoord(index=0, u_tiling=1.0, v_tiling=1.0):
+def exp_texcoord(exp_list, index=0, u_tiling=1.0, v_tiling=1.0):
 	n = Node("TextureCoordinate")
 	n["Index"] = "0"
 	n["UTiling"] = u_tiling
 	n["VTiling"] = v_tiling
-	return n
+	return exp_list.push(n)
 
 def exp_texture(path, tex_coord_exp):
 	n = Node("Texture")
@@ -224,6 +224,61 @@ def exp_color_ramp(from_node, exp_list):
 	texture_exp = exp_texture("datasmith_curves", {"expression":tex_coord})
 	return exp_list.push(texture_exp)
 
+def exp_curvergb(from_node, exp_list):
+	mapping = from_node.mapping
+	mapping.initialize()
+	curves = mapping.curves
+	ev = lambda x : (
+		curves[0].evaluate(x),
+		curves[1].evaluate(x),
+		curves[2].evaluate(x),
+		curves[3].evaluate(x),
+	) # the curves[3] is a global multiplier, not an alpha
+	values = [ev(idx/255) for idx in range(256)]
+
+	idx = len(curve_list)
+	curve_list.append(values)
+
+	factor = get_expression(from_node.inputs['Fac'], exp_list)
+	color = get_expression(from_node.inputs['Color'], exp_list)
+
+	curve_idx = exp_scalar(idx, exp_list)
+	pixel_offset = exp_scalar(0.5, exp_list)
+	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	n = Node("Add")
+	n.push(Node("0", {"expression": curve_idx}))
+	n.push(Node("1", {"expression": pixel_offset}))
+	curve_y = exp_list.push(n)
+	n2 = Node("Multiply")
+	n2.push(Node("0", {"expression": curve_y}))
+	n2.push(Node("1", {"expression": vertical_res}))
+	curve_v = exp_list.push(n2)
+
+	texture = exp_texture_object("datasmith_curves", exp_list)
+
+	lookup = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/RGBCurveLookup"})
+	lookup.push(Node("0", color))
+	lookup.push(Node("1", {"expression": curve_v}))
+	lookup.push(Node("2", {"expression": texture}))
+	blend_exp = exp_list.push(lookup)
+
+
+	blend = Node("LinearInterpolate")
+	blend.push(Node("0", color))
+	blend.push(Node("1", {"expression": blend_exp}))
+	blend.push(Node("2", factor))
+	result = exp_list.push(blend)
+
+	return result
+
+def exp_texture_object(name, exp_list):
+	n = Node("TextureObject")
+	n.push(Node("0", {
+		"name": "Texture",
+		"type": "Texture",
+		"val": name,
+	}))
+	return exp_list.push(n)
 
 reverse_expressions = {}
 
@@ -357,7 +412,12 @@ def get_expression_inner(field, exp_list):
 		return {"expression": exp, "OutputIndex": 0}
 
 	# if node.type == 'TANGENT':
-	# if node.type == 'TEX_COORD':
+	if node.type == 'TEX_COORD':
+		if socket.name == 'UV':
+			return {"expression": exp_texcoord(exp_list)}
+		else:
+			log.warn("found node texcoord with name:"+socket.name)
+
 	# if node.type == 'UVMAP':
 	# if node.type == 'VALUE':
 	# if node.type == 'WIREFRAME':
@@ -375,7 +435,7 @@ def get_expression_inner(field, exp_list):
 			cached_node = reverse_expressions[node]
 
 		if not cached_node:
-			tex_coord = exp_list.push(exp_texcoord()) # TODO: maybe not even needed?
+			tex_coord = exp_texcoord(exp_list) # TODO: maybe not even needed?
 			image = node.image
 			name = sanitize_name(image.name) # name_full?
 
@@ -410,8 +470,9 @@ def get_expression_inner(field, exp_list):
 		exp = exp_mixrgb(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
 
-	# if node.type == 'CURVE_RGB':
-
+	if node.type == 'CURVE_RGB':
+		exp = exp_curvergb(node, exp_list)
+		return {"expression": exp, "OutputIndex": 0}
 
 	# Add > Vector
 
@@ -725,7 +786,10 @@ def collect_to_uscene(context):
 		row_idx = (255-idx) * 256
 		for i in range(256):
 			pixel_idx = (row_idx + i) * 4
-			pixels[pixel_idx:pixel_idx+4] = curve[i]
+			pixels[pixel_idx] = curve[i][0]
+			pixels[pixel_idx+1] = curve[i][1]
+			pixels[pixel_idx+2] = curve[i][2]
+			pixels[pixel_idx+3] = curve[i][3]
 
 	texture = UDScene.current_scene.get_field(UDTexture, "datasmith_curves")
 	texture.image = curves_image
