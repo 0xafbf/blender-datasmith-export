@@ -179,6 +179,21 @@ def exp_hsv(node, exp_list):
 	# one takes place, if it crashes or what
 	return exp_list.push(n)
 
+def exp_invert(node, exp_list):
+	n = Node("OneMinus")
+	exp_color = get_expression(node.inputs['Color'], exp_list)
+	n.push(Node("0", exp_color))
+	invert_exp = exp_list.push(n)
+
+	blend = Node("LinearInterpolate")
+	exp_fac = get_expression(node.inputs['Fac'], exp_list)
+	blend.push(Node("0", exp_color))
+	blend.push(Node("1", {"expression": invert_exp}))
+	blend.push(Node("2", exp_fac))
+
+	return exp_list.push(blend)
+
+
 def exp_layer_weight(socket, exp_list):
 	exp_blend = get_expression(socket.node.inputs['Blend'], exp_list)
 	if socket.name == "Fresnel":
@@ -280,6 +295,36 @@ def exp_texture_object(name, exp_list):
 	}))
 	return exp_list.push(n)
 
+group_context = {}
+def exp_group(socket, exp_list):
+	node = socket.node
+	global group_context
+	previous_context = group_context
+	group_context = {}
+	for input in node.inputs:
+		group_context[input.name] = get_expression(input, exp_list)
+
+	# now traverse the inner graph
+	output_name = socket.name
+
+	node_tree_outputs = node.node_tree.nodes['Group Output'] # Should we rely on output nodes having the default name?
+	inner_socket = node_tree_outputs.inputs[output_name]
+	inner_exp = get_expression(inner_socket, exp_list)
+
+	group_context_dict = previous_context
+	return inner_exp
+
+def exp_group_input(socket, exp_list):
+	outer_expression = group_context[socket.name]
+	return outer_expression
+
+def exp_fresnel(node, exp_list):
+	n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/BlenderFresnel"})
+	exp_ior = get_expression(node.inputs['IOR'], exp_list)
+	n.push(Node("0", exp_ior))
+	return exp_list.push(n)
+
+
 reverse_expressions = {}
 
 def get_expression(field, exp_list):
@@ -351,9 +396,23 @@ def get_expression_inner(field, exp_list):
 		return {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
-			"Refraction": get_expression(node.inputs['Refraction'], exp_list),
+			"Refraction": get_expression(node.inputs['IOR'], exp_list),
 			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
 		}
+	if node.type == 'EMISSION':
+		mult = Node("Multiply")
+		mult.push(Node("0", get_expression(node.inputs['Color'], exp_list)))
+		mult.push(Node("1", get_expression(node.inputs['Strength'], exp_list)))
+		mult_exp = exp_list.push(mult)
+		return {
+			"EmissiveColor": {"expression": mult_exp}
+		}
+	if node.type == 'SUBSURFACE_SCATTERING':
+		log.warn("node SUBSURFACE_SCATTERING incomplete implementation")
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list)
+		}
+
 	if node.type == 'ADD_SHADER':
 		expressions = get_expression(node.inputs[0], exp_list)
 		expressions1 = get_expression(node.inputs[1], exp_list)
@@ -397,7 +456,9 @@ def get_expression_inner(field, exp_list):
 		return {"expression": exp, "OutputIndex": 0}
 	# if node.type == 'BEVEL':
 	# if node.type == 'CAMERA':
-	# if node.type == 'FRESNEL':
+	if node.type == 'FRESNEL':
+		exp = exp_fresnel(node, exp_list)
+		return {"expression": exp}
 	# if node.type == 'NEW_GEOMETRY':
 	# if node.type == 'HAIR_INFO':
 	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
@@ -455,13 +516,17 @@ def get_expression_inner(field, exp_list):
 
 
 	# Add > Color
-	# if node.type == 'BRIGHTCONTRAST':
+	if node.type == 'BRIGHTCONTRAST':
+		log.warn("unimplemented node BRIGHTCONTRAST")
+		return get_expression(node.inputs['Color'], exp_list)
 	# if node.type == 'GAMMA':
 	if node.type == 'HUE_SAT':
 		exp = exp_hsv(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
 
-	# if node.type == 'INVERT':
+	if node.type == 'INVERT':
+		exp = exp_invert(node, exp_list)
+		return {"expression": exp}
 	# if node.type == 'LIGHT_FALLOFF':
 	# if node.type == 'TEX_CHECKER':
 	# if node.type == 'TEX_CHECKER':
@@ -510,8 +575,15 @@ def get_expression_inner(field, exp_list):
 	# Others:
 
 	# if node.type == 'SCRIPT':
-	# if node.type == 'GROUP':
+	if node.type == 'GROUP':
+		# exp = exp_group(node, exp_list)
+		# as exp_group can output shaders (dicts with basecolor/roughness)
+		# or other types of values (dicts with expression:)
+		# it may be better to return as is and handle internally
+		return exp_group(socket, exp_list)# TODO node trees can have multiple outputs
 
+	if node.type == 'GROUP_INPUT':
+		return exp_group_input(socket, exp_list)
 
 	log.warn("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
@@ -570,7 +642,7 @@ def pbr_basic_material(material):
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
-	n.push(exp)
+	n.push(exp_list)
 
 	basecolor_idx = exp_color(material.diffuse_color, exp_list)
 	roughness_idx = exp_scalar(material.roughness, exp_list)
@@ -640,7 +712,7 @@ def collect_mesh(bl_mesh, uscene):
 
 
 	for idx, mat in enumerate(bl_mesh.materials):
-	    umesh.materials[idx] = getattr(mat, 'name', 'DefaultMaterial')
+	    umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
 
 	umesh.tris_material_slot = [p.material_index for p in m.polygons]
 	umesh.tris_smoothing_group = [0 for p in m.polygons] # no smoothing groups for now
