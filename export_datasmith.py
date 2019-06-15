@@ -195,18 +195,24 @@ def exp_invert(node, exp_list):
 
 
 def exp_layer_weight(socket, exp_list):
-	exp_blend = get_expression(socket.node.inputs['Blend'], exp_list)
-	if socket.name == "Fresnel":
-		n = Node("Fresnel")
+	expr = None
+	if socket.node in reverse_expressions:
+		expr = reverse_expressions[socket.node]
+	else:
+		exp_blend = get_expression(socket.node.inputs['Blend'], exp_list)
+		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/LayerWeight"})
 		n.push(Node("0", exp_blend))
-		return exp_list.push(n)
-	elif socket.name == "Facing":
-		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/Facing"})
-		n.push(Node("0", exp_blend))
-		return exp_list.push(n)
+		expr = exp_list.push(n)
+		reverse_expressions[socket.node] = expr
 
-	log.error("unhandled socket from LAYER_WEIGHT node.")
-	return exp_blend
+	log.warn("layer weight missing normal input")
+
+	if socket.name == "Fresnel":
+		return {"expression": expr, "OutputIndex": 0}
+	elif socket.name == "Facing":
+		return {"expression": expr, "OutputIndex": 1}
+	log.error("LAYER_WEIGHT node from unknown socket")
+	return {"expression": expr, "OutputIndex": 0}
 
 
 def exp_color_ramp(from_node, exp_list):
@@ -232,7 +238,7 @@ def exp_color_ramp(from_node, exp_list):
 	curve_v = exp_list.push(n2)
 
 	n3 = Node("AppendVector")
-	n3.push(Node("0", {"expression": level}))
+	n3.push(Node("0", level))
 	n3.push(Node("1", {"expression": curve_v}))
 	tex_coord = exp_list.push(n3)
 
@@ -354,6 +360,7 @@ def get_expression_inner(field, exp_list):
 	socket = field.links[0].from_socket
 
 	# if this node is already exported, connect to that instead
+	# I am considering in
 	if socket in reverse_expressions:
 		return reverse_expressions[socket]
 
@@ -368,6 +375,12 @@ def get_expression_inner(field, exp_list):
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
 		}
 	if node.type == 'BSDF_DIFFUSE':
+		return {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+		}
+	if node.type == 'BSDF_TOON':
+		log.warn("BSDF_TOON incomplete implementation")
 		return {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
@@ -462,8 +475,7 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'NEW_GEOMETRY':
 	# if node.type == 'HAIR_INFO':
 	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
-		exp = exp_layer_weight(socket, exp_list)
-		return {"expression": exp, "OutputIndex": 0}
+		return exp_layer_weight(socket, exp_list)
 	# if node.type == 'LIGHT_PATH':
 	# if node.type == 'OBJECT_INFO':
 	# if node.type == 'PARTICLE_INFO':
