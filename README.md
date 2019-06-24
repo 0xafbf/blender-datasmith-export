@@ -13,7 +13,5 @@ This is a work in progress, if you want to contribute to improve it, feel free
 to submit pull requests or support me on Patreon:
 https://www.patreon.com/0xafbf
 
-This is an unofficial exporter. This is not supported by Epic Games. That being
-said, you can still discuss about it and give feedback in the Unreal Engine
-forums.
+This is an unofficial exporter. If you would like to get in touch, please [join the project Discord](https://discord.gg/h2GHqMq)
 
