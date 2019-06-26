@@ -780,9 +780,19 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 	elif bl_obj.type == 'CAMERA':
 		uobj = UDActorCamera(**kwargs)
 		bl_cam = bl_obj.data
-		uobj.focal_length = bl_cam.lens
-		uobj.focus_distance = bl_cam.dof.focus_distance
 		uobj.sensor_width = bl_cam.sensor_width
+		# blender does not have aspect ratio for cameras
+		# uobj.sensor_aspect_ratio = 1.777778
+		uobj.enable_dof = bl_cam.dof.use_dof
+		if uobj.enable_dof:
+			uobj.focus_distance = bl_cam.dof.focus_distance
+			if bl_cam.dof.focus_object:
+				# TODO test this, I don't know if this look_at_actor
+				# is for focus or for rotating the camera.
+				uobj.look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
+			uobj.f_stop = bl_cam.dof.aperture_fstop
+
+		uobj.focal_length = bl_cam.lens
 
 	elif bl_obj.type == 'LIGHT':
 		uobj = UDActorLight(**kwargs)

@@ -457,21 +457,17 @@ class UDActorCamera(UDActor):
 
 	def __init__(self, *, node=None, name=None):
 		super().__init__(node=node, name=name)
+
 		self.sensor_width = 36.0
 		self.sensor_aspect_ratio = 1.777778
+		self.enable_dof = False
 		self.focus_distance = 1000.0
-		self.f_stop = 5.6
-		self.focal_length = 32.0
+		self.f_stop = 2.8
+		self.focal_length = 50.0
+		self.look_at_actor = None
 		self.post = []
 		if node:
 			self.parse(node)
-
-	def parse(self, node):
-		self.sensor_width =       	node.find('SensorWidth').attrib['value']
-		self.sensor_aspect_ratio =	node.find('SensorAspectRatio').attrib['value']
-		self.focus_distance =     	node.find('FocusDistance').attrib['value']
-		self.f_stop =             	node.find('FStop').attrib['value']
-		self.focal_length =       	node.find('FocalLength').attrib['value']
 
 	def node(self):
 		n = super().node()
