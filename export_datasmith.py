@@ -807,7 +807,31 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			uobj.color = bl_light.color
 			uobj.intensity = bl_light.energy
 
-		if bl_light.type == 'POINT':
+		if bl_light.type == 'SUN':
+			uobj.type = UDActorLight.LIGHT_SUN
+		elif bl_light.type == 'AREA':
+			uobj.type = UDActorLight.LIGHT_AREA
+
+			size_w = size_h = bl_light.size
+			if (bl_light.shape == 'RECTANGLE'
+				or bl_light.shape == 'ELLIPSE'):
+				size_h = bl_light.size_y
+
+			light_shape = 'Rectangle'
+			if (bl_light.shape == 'DISK'
+				or bl_light.shape == 'ELLIPSE'):
+				light_shape = 'Disc'
+
+			uobj.shape = Node('Shape', {
+				"type": light_shape, # can be Rectangle, Disc, Sphere, Cylinder, None
+				"width": size_w * 100, # convert to cm
+				"length": size_h * 100,
+				"LightType": "Rect", # can be "Point", "Spot", "Rect"
+				})
+
+
+
+		elif bl_light.type == 'POINT':
 			uobj.type = UDActorLight.LIGHT_POINT
 		elif bl_light.type == 'SPOT':
 			uobj.type = UDActorLight.LIGHT_SPOT

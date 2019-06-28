@@ -408,8 +408,16 @@ class UDActorLight(UDActor):
 
 	LIGHT_POINT = 'PointLight'
 	LIGHT_SPOT = 'SpotLight'
+	LIGHT_SUN = 'DirectionalLight'
+	LIGHT_AREA = 'AreaLight'
 
+
+	# By default, all lights use unitless
+	# Area lights use lumens
+	# directional lights don't write intensityunits
 	LIGHT_UNIT_CANDELAS = 'Candelas'
+	LIGHT_UNIT_LUMENS = 'Lumens'
+	LIGHT_UNIT_UNITLESS = 'Unitless'
 
 	def __init__(self, *, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
 		super().__init__(node=node, name=name)
@@ -419,17 +427,11 @@ class UDActorLight(UDActor):
 		self.color = color
 		self.inner_cone_angle = 22.5
 		self.outer_cone_angle = 25
+		self.shape = None
+		self.node_props = []
 		self.post = []
 		if node:
 			self.parse(node)
-	def parse(self, node):
-		self.type = node.attrib['type']
-
-		# self.intensity =       	node.find('Intensity').attrib['value']
-		# self.intensity_units = 	node.find('IntensityUnits').attrib['value']
-		# self.color =           	node.find('Color').attrib['value']
-		# self.inner_cone_angle =	node.find('InnerConeAngle').attrib['value']
-		# self.outer_cone_angle =	node.find('OuterConeAngle').attrib['value']
 
 	def node(self):
 		n = super().node()
@@ -446,9 +448,14 @@ class UDActorLight(UDActor):
 			'G': f(self.color[1]),
 			'B': f(self.color[2]),
 			}))
-		if self.type == UDActorLight.LIGHT_SPOT:
+		if (self.type == UDActorLight.LIGHT_SPOT
+			or self.type == UDActorLight.LIGHT_AREA):
 			n.push(val('InnerConeAngle', self.inner_cone_angle))
 			n.push(val('OuterConeAngle', self.outer_cone_angle))
+		if self.shape:
+			n.push(self.shape)
+		for prop in self.node_props:
+			n.push(prop)
 		return n
 
 class UDActorCamera(UDActor):
