@@ -543,8 +543,9 @@ class UDScene():
 
 		for name, obj in self.objects.items():
 			n.push(obj.node())
-		for env in self.environment:
-			n.push(env)
+		if self.environment:
+			for env in self.environment:
+				n.push(env)
 		for name, mesh in self.meshes.items():
 			n.push(mesh.node())
 		for mat in self.material_nodes:

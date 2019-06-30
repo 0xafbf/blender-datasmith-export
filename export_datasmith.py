@@ -812,10 +812,14 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
 		else:
 			uobj.color = bl_light.color
-			uobj.intensity = bl_light.energy * 0.272 # per the UE4 inverse square falloff tooltip, and converting 1700 unitless to cd
-			uobj.intensity_units = UDActorLight.LIGHT_UNIT_UNITLESS
+			uobj.intensity = bl_light.energy * 0.08 # came up with this constant by brute force
+			# blender watts unit match ue4 lumens unit, but in spot lights the brightness
+			# changes with the spot angle when using lumens while candelas do not.
+
+			uobj.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
 
 		if bl_light.type == 'SUN':
+			uobj.intensity = bl_light.energy # suns are in lux
 			uobj.type = UDActorLight.LIGHT_SUN
 		elif bl_light.type == 'AREA':
 			uobj.type = UDActorLight.LIGHT_AREA
@@ -850,7 +854,8 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			uobj.type = UDActorLight.LIGHT_SPOT
 			angle = bl_light.spot_size * 180 / (2*math.pi)
 			uobj.outer_cone_angle = angle
-			uobj.inner_cone_angle = angle - angle * bl_light.spot_blend
+			inner_angle = angle * (1 - bl_light.spot_blend)
+			uobj.inner_cone_angle = inner_angle if inner_angle > 0.0001 else 0.0001
 
 	else: # maybe empties
 		uobj = UDActor(**kwargs)
@@ -894,6 +899,8 @@ def collect_environment(world):
 	nodes = world.node_tree
 	output = nodes.get_output_node('EEVEE') or nodes.get_output_node('ALL') or nodes.get_output_node('CYCLES')
 	background_node = output.inputs['Surface'].links[0].from_node
+	if not background_node.inputs['Color'].links:
+		return
 	source_node = background_node.inputs['Color'].links[0].from_node
 	if source_node.type != 'TEX_ENVIRONMENT':
 		log.info("Background texture is "+ source_node.type)
