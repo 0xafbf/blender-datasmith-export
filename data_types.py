@@ -272,7 +272,12 @@ class UDTexture():
 
 	def abs_path(self):
 		safe_name = sanitize_name(self.name)
-		return "{}/{}.png".format(UDScene.current_scene.export_path, safe_name)
+		ext = "png"
+		if self.image.file_format == 'JPEG':
+			ext = "jpg"
+		elif self.image.file_format == 'HDR':
+			ext = "hdr"
+		return "{}/{}.{}".format(UDScene.current_scene.export_path, safe_name, ext)
 
 	def node(self):
 		n = Node('Texture')
@@ -280,22 +285,24 @@ class UDTexture():
 		n['file'] = self.abs_path()
 		n['rgbcurve'] = 0.0
 
-		# FIXME: Find a way to tell unreal to read as non-srgb
-		if self.image.colorspace_settings.is_data:
-			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
-			n['rgbcurve'] = "0.454545"
+
+		if self.image.file_format == 'HDR':
+			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
+			n['rgbcurve'] = "1.000000"
+		elif self.image.colorspace_settings.is_data:
+			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 		else:
 			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
 
 
 		n['texturemode'] = self.texture_mode
+		n['texturefilter'] = "3"
 		n.push(Node('Hash', {'value': self.hash}))
 		return n
 
 	def save(self):
 		image_path = path.join(UDScene.current_scene.basedir, self.abs_path())
 		old_path = self.image.filepath_raw
-		self.image.file_format = 'PNG'
 		self.image.filepath_raw = image_path
 		self.image.save()
 		if old_path:
@@ -389,16 +396,19 @@ class UDActorMesh(UDActor):
 
 	node_type = 'ActorMesh'
 
-	def __init__(self, *, node=None, name=None):
-		super().__init__(node=node, name=name)
-		if node:
-			self.mesh = node.find('mesh').attrib['name']
-			self.materials = {n.attrib['id']: n.attrib['name'] for n in node.findall('material')}
+	def __init__(self, *, name=None):
+		self.mesh = None
+		self.materials = {}
+		super().__init__( name=name)
 
 	def node(self):
 		n = super().node()
 		n.name = 'ActorMesh'
 		n.push(Node('mesh', {'name': self.mesh}))
+
+		for idx, m in self.materials.items():
+			n.push(Node('material', {'id':idx, 'name':m}))
+
 		return n
 
 
@@ -502,6 +512,7 @@ class UDScene():
 		self.meshes = {}
 		self.objects = {}
 		self.textures = {}
+		self.environment = None
 
 
 	def get_field(self, cls, name, **kwargs):
@@ -532,6 +543,8 @@ class UDScene():
 
 		for name, obj in self.objects.items():
 			n.push(obj.node())
+		for env in self.environment:
+			n.push(env)
 		for name, mesh in self.meshes.items():
 			n.push(mesh.node())
 		for mat in self.material_nodes:

@@ -305,6 +305,9 @@ group_context = {}
 def exp_group(socket, exp_list):
 	node = socket.node
 	global group_context
+	global reverse_expressions
+	previous_reverse = reverse_expressions
+	reverse_expressions = {}
 	previous_context = group_context
 	group_context = {}
 	for input in node.inputs:
@@ -318,6 +321,7 @@ def exp_group(socket, exp_list):
 	inner_exp = get_expression(inner_socket, exp_list)
 
 	group_context_dict = previous_context
+	reverse_expressions = previous_reverse
 	return inner_exp
 
 def exp_group_input(socket, exp_list):
@@ -493,6 +497,9 @@ def get_expression_inner(field, exp_list):
 
 	# if node.type == 'UVMAP':
 	# if node.type == 'VALUE':
+	if node.type == 'VALUE':
+		exp = exp_scalar(node.outputs[0].default_value, exp_list)
+		return {"expression": exp}
 	# if node.type == 'WIREFRAME':
 
 
@@ -805,7 +812,8 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
 		else:
 			uobj.color = bl_light.color
-			uobj.intensity = bl_light.energy
+			uobj.intensity = bl_light.energy * 0.272 # per the UE4 inverse square falloff tooltip, and converting 1700 unitless to cd
+			uobj.intensity_units = UDActorLight.LIGHT_UNIT_UNITLESS
 
 		if bl_light.type == 'SUN':
 			uobj.type = UDActorLight.LIGHT_SUN
@@ -829,9 +837,14 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 				"LightType": "Rect", # can be "Point", "Spot", "Rect"
 				})
 
+		uobj.node_props.append(
+			Node('SourceSize', {
+				"value": bl_light.shadow_soft_size * 100,
+				}
+			)
+		)
 
-
-		elif bl_light.type == 'POINT':
+		if bl_light.type == 'POINT':
 			uobj.type = UDActorLight.LIGHT_POINT
 		elif bl_light.type == 'SPOT':
 			uobj.type = UDActorLight.LIGHT_SPOT
@@ -872,6 +885,50 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 	return uobj
 
 
+def collect_environment(world):
+
+	log.info("Collecting environment")
+	if not world.use_nodes:
+		return
+	log.info("Collecting environment")
+	nodes = world.node_tree
+	output = nodes.get_output_node('EEVEE') or nodes.get_output_node('ALL') or nodes.get_output_node('CYCLES')
+	background_node = output.inputs['Surface'].links[0].from_node
+	source_node = background_node.inputs['Color'].links[0].from_node
+	if source_node.type != 'TEX_ENVIRONMENT':
+		log.info("Background texture is "+ source_node.type)
+		return
+	log.info("Collecting environment")
+	image = source_node.image
+
+	tex_name = sanitize_name(image.name)
+	texture = UDScene.current_scene.get_field(UDTexture, tex_name)
+	texture.image = image
+
+	tex_node = Node("Texture", {
+		"tex": tex_name,
+		})
+
+	n2 = Node("Environment", {
+		"name": "world_environment_lighting",
+		"label": "world_environment_lighting",
+		})
+	n2.push(tex_node)
+	n2.push(Node("Illuminate", {
+		"enabled": "1"
+		}))
+	n = Node("Environment", {
+		"name": "world_environment_background",
+		"label": "world_environment_background",
+		})
+	n.push(tex_node)
+	n.push(Node("Illuminate", {
+		"enabled": "0"
+		}))
+
+
+	return [n, n2]
+
 
 curve_list = []
 def collect_to_uscene(context):
@@ -884,6 +941,8 @@ def collect_to_uscene(context):
 	for obj in root_objects:
 		uobj = collect_object(obj, uscene, context=context)
 		uscene.objects[uobj.name] = uobj
+
+	uscene.environment = collect_environment(context.scene.world)
 
 	global curve_list
 	curve_list = []
