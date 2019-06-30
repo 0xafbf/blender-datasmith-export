@@ -490,6 +490,8 @@ class UDActorCamera(UDActor):
 		n = super().node()
 		n.name = 'Camera'
 		val = node_value
+		use_dof = "1" if self.enable_dof else "0"
+		n.push(Node("DepthOfField", {"enabled": use_dof}))
 		n.push(val('SensorWidth', self.sensor_width))
 		n.push(val('SensorAspectRatio', self.sensor_aspect_ratio))
 		n.push(val('FocusDistance', self.focus_distance))
