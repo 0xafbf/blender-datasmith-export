@@ -277,6 +277,8 @@ class UDTexture():
 			ext = "jpg"
 		elif self.image.file_format == 'HDR':
 			ext = "hdr"
+		elif self.image.file_format == 'OPEN_EXR':
+			ext = "exr"
 		return "{}/{}.{}".format(UDScene.current_scene.export_path, safe_name, ext)
 
 	def node(self):

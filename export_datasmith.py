@@ -46,13 +46,15 @@ def exp_texcoord(exp_list, index=0, u_tiling=1.0, v_tiling=1.0):
 	n["Index"] = "0"
 	n["UTiling"] = u_tiling
 	n["VTiling"] = v_tiling
-	return exp_list.push(n)
+	return {"expression": exp_list.push(n)}
 
-def exp_texture(path, tex_coord_exp):
+# instead of setting coordinates here, use coordinates when creating
+# the texture expression instead
+def exp_texture(path): # , tex_coord_exp):
 	n = Node("Texture")
 	n["Name"] = ""
 	n["PathName"] = path
-	n.push(Node("Coordinates", tex_coord_exp))
+	#n.push(Node("Coordinates", tex_coord_exp))
 	return n
 
 # these map 1:1 with UE4 nodes:
@@ -193,6 +195,25 @@ def exp_invert(node, exp_list):
 
 	return exp_list.push(blend)
 
+def exp_mapping(node, exp_list):
+	# 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
+	n = None
+	if node.vector_type == 'TEXTURE':
+		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingTexture2D"})
+	else: # if node.vector_type == 'POINT':
+		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingPoint2D"})
+
+	location = exp_color((*node.translation, 1), exp_list)
+	rotation = exp_color((*node.rotation, 1), exp_list)
+	scale = exp_color((*node.scale, 1), exp_list)
+
+	input_vector = get_expression(node.inputs['Vector'], exp_list)
+	n.push(Node("0", input_vector))
+	n.push(Node("1", {"expression": location}))
+	n.push(Node("2", {"expression": rotation}))
+	n.push(Node("3", {"expression": scale}))
+
+	return {"expression": exp_list.push(n)}
 
 def exp_layer_weight(socket, exp_list):
 	expr = None
@@ -242,7 +263,9 @@ def exp_color_ramp(from_node, exp_list):
 	n3.push(Node("1", {"expression": curve_v}))
 	tex_coord = exp_list.push(n3)
 
-	texture_exp = exp_texture("datasmith_curves", {"expression":tex_coord})
+	texture_exp = exp_texture("datasmith_curves")
+	texture_exp.push(Node("Coordinates", {"expression":tex_coord}))
+
 	return exp_list.push(texture_exp)
 
 def exp_curvergb(from_node, exp_list):
@@ -337,7 +360,13 @@ def exp_fresnel(node, exp_list):
 
 reverse_expressions = {}
 
+
 def get_expression(field, exp_list):
+
+	# this may return none for fields without default value
+	# most (all?) of the time blender doesn't have default value for vector
+	# node inputs, but it does for scalars and colors
+	# TODO: check which cases we should be careful
 	if not field.links:
 		if field.type == 'VALUE':
 			exp = exp_scalar(field.default_value, exp_list)
@@ -347,7 +376,9 @@ def get_expression(field, exp_list):
 			return {"expression": exp, "OutputIndex": 0}
 		else:
 			log.error("there is no default for field type " + field.type)
+			return None
 
+	# here we are assuming field has links
 	return_exp = get_expression_inner(field, exp_list)
 
 	if not return_exp:
@@ -362,7 +393,7 @@ def get_expression_inner(field, exp_list):
 
 	node = field.links[0].from_node
 	socket = field.links[0].from_socket
-
+	log.debug("getting node:"+node.name+" output:"+socket.name)
 	# if this node is already exported, connect to that instead
 	# I am considering in
 	if socket in reverse_expressions:
@@ -491,7 +522,7 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'TANGENT':
 	if node.type == 'TEX_COORD':
 		if socket.name == 'UV':
-			return {"expression": exp_texcoord(exp_list)}
+			return exp_texcoord(exp_list)
 		else:
 			log.warn("found node texcoord with name:"+socket.name)
 
@@ -515,14 +546,16 @@ def get_expression_inner(field, exp_list):
 			cached_node = reverse_expressions[node]
 
 		if not cached_node:
-			tex_coord = exp_texcoord(exp_list) # TODO: maybe not even needed?
+
+			tex_coord = get_expression(node.inputs['Vector'], exp_list)
 			image = node.image
 			name = sanitize_name(image.name) # name_full?
 
 			texture = UDScene.current_scene.get_field(UDTexture, name)
 			texture.image = image
-
-			texture_exp = exp_texture(name, {"expression":tex_coord})
+			texture_exp = exp_texture(name)
+			if tex_coord:
+				texture_exp.push(Node("Coordinates", tex_coord))
 			cached_node = exp_list.push(texture_exp)
 			reverse_expressions[node] = cached_node
 
@@ -562,7 +595,8 @@ def get_expression_inner(field, exp_list):
 
 	# if node.type == 'BUMP':
 	# if node.type == 'DISPLACEMENT':
-	# if node.type == 'MAPPING':
+	if node.type == 'MAPPING':
+		return exp_mapping(node, exp_list)
 	# if node.type == 'NORMAL':
 	# if node.type == 'NORMAL_MAP':
 	# if node.type == 'CURVE_VEC':
@@ -603,6 +637,9 @@ def get_expression_inner(field, exp_list):
 
 	if node.type == 'GROUP_INPUT':
 		return exp_group_input(socket, exp_list)
+
+	if node.type == 'REROUTE':
+		return get_expression(node.inputs['Input'], exp_list)
 
 	log.warn("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
@@ -805,11 +842,12 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		uobj = UDActorLight(**kwargs)
 		bl_light = bl_obj.data
 
-		if bl_light.node_tree:
+		if bl_light.use_nodes and bl_light.node_tree:
 
 			node = bl_light.node_tree.nodes['Emission']
 			uobj.color = node.inputs['Color'].default_value
 			uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+			log.warn("unsupported: using nodetree for light " + bl_obj.name)
 		else:
 			uobj.color = bl_light.color
 			uobj.intensity = bl_light.energy * 0.08 # came up with this constant by brute force
