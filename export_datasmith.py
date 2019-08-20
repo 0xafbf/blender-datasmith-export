@@ -324,6 +324,33 @@ def exp_texture_object(name, exp_list):
 	}))
 	return exp_list.push(n)
 
+def exp_bump(node, exp_list):
+	height_input = node.inputs['Height']
+	if height_input.links:
+		from_node = height_input.links[0].from_node
+		if from_node.type == 'TEX_IMAGE':
+			image = from_node.image
+			name = sanitize_name(image.name)
+
+			# ensure that texture is exported
+			texture = UDScene.current_scene.get_field(UDTexture, name)
+			texture.image = image
+
+			image_object = exp_texture_object(name, exp_list)
+			bump_node = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap"})
+			bump_node.push(Node("0", {"expression": image_object}))
+			bump_node.push(Node("1", get_expression(node.inputs['Strength'], exp_list)))
+			bump_node.push(Node("2", get_expression(node.inputs['Distance'], exp_list)))
+			bump_node.push(Node("3", get_expression(from_node.inputs['Vector'], exp_list)))
+			exp = exp_list.push(bump_node)
+			return {"expression": exp}
+
+		else:
+			log.warn("trying to export bump node, but input is not an image")
+	else:
+		log.warn("trying to export bump node without connections")
+
+
 group_context = {}
 def exp_group(socket, exp_list):
 	node = socket.node
@@ -382,9 +409,13 @@ def get_expression(field, exp_list):
 	return_exp = get_expression_inner(field, exp_list)
 
 	if not return_exp:
-		log.error("didn't get expression from node: %s" % from_node.type)
-		exp = exp_scalar(0, exp_list)
-		return {"expression": exp, "OutputIndex": 0}
+		pass
+		# previously I did this validation to ensure that stuff is handled...
+		# but normal maps work better if left disconnected, so i'm removing this
+		# log.error("didn't get expression from node: %s" % from_node.type)
+		# exp = exp_scalar(0, exp_list)
+		# return {"expression": exp, "OutputIndex": 0}
+
 	socket = field.links[0].from_socket
 	reverse_expressions[socket] = return_exp
 	return return_exp
@@ -403,50 +434,60 @@ def get_expression_inner(field, exp_list):
 	# TODO: all the shaders are missing normal maps
 
 	# Shader nodes return a dictionary
+	bsdf = None
 	if node.type == 'BSDF_PRINCIPLED':
-		return {
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Base Color'], exp_list),
 			"Metallic": get_expression(node.inputs['Metallic'], exp_list),
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+
 		}
-	if node.type == 'BSDF_DIFFUSE':
-		return {
+	elif node.type == 'BSDF_DIFFUSE':
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 		}
-	if node.type == 'BSDF_TOON':
+	elif node.type == 'BSDF_TOON':
 		log.warn("BSDF_TOON incomplete implementation")
-		return {
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 		}
-	if node.type == 'BSDF_GLOSSY':
-		return {
+	elif node.type == 'BSDF_GLOSSY':
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
 			"Metallic": {"expression": exp_scalar(1.0, exp_list)},
 		}
-	if node.type == 'BSDF_VELVET':
+	elif node.type == 'BSDF_VELVET':
 		log.warn("BSDF_VELVET incomplete implementation")
-		return {
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 		}
-	if node.type == 'BSDF_TRANSPARENT':
+	elif node.type == 'BSDF_TRANSPARENT':
 		log.warn("BSDF_TRANSPARENT incomplete implementation")
-		return {
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Refraction": {"expression": exp_scalar(1.0, exp_list)},
 			"Opacity": {"expression": exp_scalar(0.0, exp_list)},
 		}
-	if node.type == 'BSDF_GLASS':
+	elif node.type == 'BSDF_GLASS':
 		log.warn("BSDF_GLASS incomplete implementation")
-		return {
+		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
 			"Refraction": get_expression(node.inputs['IOR'], exp_list),
 			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
 		}
+
+	if bsdf:
+		if "Normal" in node.inputs:
+			normal_expression = get_expression(node.inputs['Normal'], exp_list)
+			if normal_expression:
+				bsdf["Normal"] = normal_expression
+		return bsdf
+
 	if node.type == 'EMISSION':
 		mult = Node("Multiply")
 		mult.push(Node("0", get_expression(node.inputs['Color'], exp_list)))
@@ -551,8 +592,10 @@ def get_expression_inner(field, exp_list):
 			image = node.image
 			name = sanitize_name(image.name) # name_full?
 
+			# ensure that texture is exported
 			texture = UDScene.current_scene.get_field(UDTexture, name)
 			texture.image = image
+
 			texture_exp = exp_texture(name)
 			if tex_coord:
 				texture_exp.push(Node("Coordinates", tex_coord))
@@ -593,12 +636,15 @@ def get_expression_inner(field, exp_list):
 
 	# Add > Vector
 
-	# if node.type == 'BUMP':
+	if node.type == 'BUMP':
+		return exp_bump(node, exp_list)
 	# if node.type == 'DISPLACEMENT':
 	if node.type == 'MAPPING':
 		return exp_mapping(node, exp_list)
 	# if node.type == 'NORMAL':
-	# if node.type == 'NORMAL_MAP':
+	if node.type == 'NORMAL_MAP':
+		node_input = node.inputs['Color']
+		return get_expression(node_input, exp_list)
 	# if node.type == 'CURVE_VEC':
 	# if node.type == 'VECTOR_DISPLACEMENT':
 	# if node.type == 'VECT_TRANSFORM':
