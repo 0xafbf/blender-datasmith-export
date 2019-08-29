@@ -269,6 +269,7 @@ class UDTexture():
 		self.name = name
 		self.image = None
 		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
+		self.normal_map_flag = False
 
 	def abs_path(self):
 		safe_name = sanitize_name(self.name)
@@ -291,6 +292,8 @@ class UDTexture():
 		if self.image.file_format == 'HDR':
 			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 			n['rgbcurve'] = "1.000000"
+		elif self.normal_map_flag:
+			self.texture_mode = UDTexture.TEXTURE_MODE_NORMAL_GREEN_INV
 		elif self.image.colorspace_settings.is_data:
 			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 		else:

@@ -385,8 +385,16 @@ def exp_fresnel(node, exp_list):
 	return exp_list.push(n)
 
 
-reverse_expressions = {}
+context_stack = []
+def push_context(context):
+	context_stack.append(context)
 
+def pop_context():
+	context_stack.pop()
+
+def get_context():
+	if context_stack:
+		return context_stack[-1]
 
 def get_expression(field, exp_list):
 
@@ -594,6 +602,9 @@ def get_expression_inner(field, exp_list):
 
 			# ensure that texture is exported
 			texture = UDScene.current_scene.get_field(UDTexture, name)
+			if (get_context() == 'NORMAL'):
+				texture.normal_map_flag = True
+
 			texture.image = image
 
 			texture_exp = exp_texture(name)
@@ -644,7 +655,12 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'NORMAL':
 	if node.type == 'NORMAL_MAP':
 		node_input = node.inputs['Color']
-		return get_expression(node_input, exp_list)
+		# hack: is it safe to assume that everything under here is normal?
+		# maybe not, because it could be masks to mix normals
+		push_context("NORMAL")
+		return_exp = get_expression(node_input, exp_list)
+		pop_context()
+		return return_exp
 	# if node.type == 'CURVE_VEC':
 	# if node.type == 'VECTOR_DISPLACEMENT':
 	# if node.type == 'VECT_TRANSFORM':
