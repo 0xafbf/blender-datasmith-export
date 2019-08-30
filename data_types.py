@@ -31,13 +31,23 @@ def flatten(it):
 			data += [*d]
 	return data
 
+import numpy as np
 def write_array_data(io, data_struct, data):
 	# first get data length
 	length = len(data)
 	data_struct = '<I' + (data_struct) * length
-	flat_data = flatten(data)
-	output = struct.pack(data_struct, length, *flat_data)
-	io.write(output)
+	flat_data = None
+	output = b''
+	if isinstance(data, np.ndarray):
+
+		output += struct.pack('<I', length)
+		output += data.tobytes()
+	else:
+		flat_data = flatten(data)
+		output = struct.pack(data_struct, length, *flat_data)
+	if io:
+		io.write(output)
+	return output
 
 def read_data(io, data_struct):
 	struct_size = struct.calcsize(data_struct)
@@ -156,6 +166,9 @@ class UDMesh():
 		self.vertex_normals = []
 		self.uvs = []
 		self.vertex_colors = [] # In 0-255 range
+
+		self.test = []
+
 		self.relative_path = None
 		self.hash = ''
 
@@ -198,18 +211,50 @@ class UDMesh():
 
 			# further analysis revealed:
 			# this loops are per triangle
+			print("writing material slots")
 			write_array_data(file, 'I', self.tris_material_slot)
+			print("writing smoothing groups")
 			write_array_data(file, 'I', self.tris_smoothing_group)
+
+
 			# per vertex
+			print("writing vertices")
 			write_array_data(file, 'fff', self.vertices) # VertexPositions
+
+			# b2 = write_array_data(file, 'fff', self.test)
+			# print(self.vertices)
+			# print(self.test)
+			# print(b1[0:10])
+			# print(b2[0:10])
+
+
 			# per vertexloop
+			print("writing triangles")
 			write_array_data(file, 'I', self.triangles) # WedgeIndices
+
+
 			write_null(file, 4) # WedgeTangentX
 			write_null(file, 4) # WedgeTangentY
+			print("writing normals")
 			write_array_data(file, 'fff', self.vertex_normals) # WedgeTangentZ
+
+
+
+
+			print("writing uvs")
 			write_array_data(file, 'ff', self.uvs) # WedgeTexCoords[0]
+
 			write_null(file, 4 * 7) # WedgeTexCoords[1..7]
+			print("writing vertex colors")
 			write_array_data(file, 'BBBB', self.vertex_colors) # WedgeColors
+			# b2 = write_array_data(file, 'BBBB', self.test) # WedgeTexCoords[0]
+
+			# print("old and new are same? {}".format(b1 == b2))
+			# print(b2[4:24])
+			# print(self.vertex_colors.tobytes()[:20])
+			# print(self.vertex_colors[:20])
+			# print(self.test[:20])
+
 			write_null(file, 4) # MaterialIndexToImportIndex
 
 			#here ends rawmesh
