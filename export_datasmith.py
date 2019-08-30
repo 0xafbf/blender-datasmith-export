@@ -846,63 +846,48 @@ def collect_mesh(bl_mesh, uscene):
 	polygons = m.polygons
 	num_polygons = len(polygons)
 	material_slots = np.empty(num_polygons, np.uint32)
-	# for idx in range(num_polygons):
-		# material_slots[idx] = polygons[idx].material_index
+
 	polygons.foreach_get("material_index", material_slots)
 	umesh.tris_material_slot = material_slots # [p.material_index for p in m.polygons]
 
 	umesh.tris_smoothing_group = np.zeros(num_polygons, np.uint32)
-	# umesh.tris_smoothing_group = [0 for p in m.polygons] # no smoothing groups for now
 
 	vertices = m.vertices
 	num_vertices = len(vertices)
-	# vertices_array = np.empty((num_vertices, 3), np.float32)
+
 	vertices_array = np.empty(num_vertices* 3, np.float32)
 	vertices.foreach_get("co", vertices_array)
-	# for idx in range(num_vertices):
-		# vertices_array[idx, :] = vertices[idx].co[0:3]
 
 	umesh.vertices = vertices_array.reshape(-1, 3)
-	# umesh.vertices = [v.co.copy() for v in m.vertices]
 
 	loops = m.loops
 	num_loops = len(loops)
 
 	triangles = np.empty(num_loops, np.uint32)
 	loops.foreach_get("vertex_index", triangles)
-	# for idx in range(num_loops):
-	# 	triangles[idx] = loops[idx].vertex_index
-	umesh.triangles = triangles
-	# umesh.triangles = [l.vertex_index for l in m.loops]
 
-	# normals = np.empty((num_loops, 3), np.float32)
+	umesh.triangles = triangles
+
 	normals = np.empty(num_loops* 3, np.float32)
 	loops.foreach_get("normal", normals)
 	normals = normals.reshape((num_loops, 3))
-	# for idx in range(num_loops):
-	# 	normals[idx, :] = loops[idx].normal
 	normals = normals @ matrix_normals
 
 	umesh.vertex_normals = np.ascontiguousarray(normals, "<f4")
-	# umesh.test = [matrix_normals2 @ l.normal for l in m.loops] # don't know why, but copy is needed for this only
 
 	uvs = np.empty(num_loops* 2, np.float32)
 	uv_data = m.uv_layers[0].data
 
 	uv_data.foreach_get("uv", uvs)
-	# for idx in range(num_loops):
-	# 	uvs[idx, :] = uv_data[idx].uv
-	#uvs = uvs.reshape((num_loops, 2))
-	# uvs[:, 1] = 1-uvs[:, 1] # flip v
 	uvs[1::2] = 1 - uvs[1::2]
 	umesh.uvs = uvs.reshape((-1, 2))
-	# umesh.test = [fix_uv(m.uv_layers[0].data[l.index].uv.copy()) for l in m.loops]
+
 	if (m.vertex_colors):
 		vertex_colors = np.empty(num_loops * 4)
 		m.vertex_colors[0].data.foreach_get("color", vertex_colors)
 		vertex_colors *= 255
 		umesh.vertex_colors = vertex_colors.reshape((-1, 4)).astype(np.uint8)
-		# umesh.test = [color_uchar(m.vertex_colors[0].data[l.index].color) for l in m.loops]
+
 	bpy.data.meshes.remove(m)
 	return umesh
 
