@@ -886,7 +886,9 @@ def collect_mesh(bl_mesh, uscene):
 		vertex_colors = np.empty(num_loops * 4)
 		m.vertex_colors[0].data.foreach_get("color", vertex_colors)
 		vertex_colors *= 255
-		umesh.vertex_colors = vertex_colors.reshape((-1, 4)).astype(np.uint8)
+		vertex_colors = vertex_colors.reshape((-1, 4))
+		vertex_colors[:, [0, 2]] = vertex_colors[:, [2, 0]]
+		umesh.vertex_colors = vertex_colors.astype(np.uint8)
 
 	bpy.data.meshes.remove(m)
 	return umesh
