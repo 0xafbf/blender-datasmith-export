@@ -144,8 +144,8 @@ def exp_math(node, exp_list):
 			n.push(Node("4", one)) # A < B
 		elif op == 'GREATER_THAN':
 			n = Node("If")
-			one = exp_scalar(1.0, exp_list)
-			zero = exp_scalar(0.0, exp_list)
+			one = {"expression": exp_scalar(1.0, exp_list)}
+			zero = {"expression": exp_scalar(0.0, exp_list)}
 			n.push(Node("0", in_0)) # A
 			n.push(Node("1", in_1)) # B
 			n.push(Node("2", one)) # A > B
@@ -153,25 +153,56 @@ def exp_math(node, exp_list):
 			n.push(Node("4", zero)) # A < B
 
 	assert n, "unrecognized math operation: %s" % op
-	return exp_list.push(n)
+	exp = exp_list.push(n)
+	return {"expression": exp, "OutputIndex": 0}
 
 op_map_color = {
+# MIX is handled manually
+	'DARKEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Darken",
+# MULTIPLY is handled in op_map
+	'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorBurn",
+	# TODO: check for blender implementation of burn, it could mean this:
+	#'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearBurn",
+	'LIGHTEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Lighten",
+	'SCREEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Screen",
+	'DODGE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorDodge",
 	'OVERLAY': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Overlay",
+# ADD is handled in op_map
+	'SOFT_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_SoftLight",
+	'LINEAR_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearLight",
+	'DIFFERENCE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Difference",
+# SUBTRACT is handled in op_map
+# DIVIDE is handled in op_map
+# HUE is unhandled TODO
+# SATURATION is unhandled
+# COLOR is unhandled
+# VALUE is unhandled
 }
 
-def exp_mixrgb(node, exp_list):
-	op = node.blend_type
-	n = Node("FunctionCall", { "Function": op_map_color[op]})
-	exp_1 = get_expression(node.inputs['Color1'], exp_list)
-	n.push(Node("0", exp_1))
-	exp_2 = get_expression(node.inputs['Color2'], exp_list)
-	n.push(Node("1", exp_2))
+def exp_blend(exp_0, exp_1, blend_type, exp_list):
+	if blend_type == 'MIX':
+		return exp_1
+	n = None
+	if blend_type in {'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'}:
+		n = Node(op_map[blend_type])
+	else:
+		n = Node("FunctionCall", { "Function": op_map_color[blend_type]})
+	assert n
+	n.push(Node("0", exp_0))
+	n.push(Node("1", exp_1))
+	return {"expression": exp_list.push(n)}
 
-	exp_blend = {"expression": exp_list.push(n)}
+
+
+def exp_mixrgb(node, exp_list):
+	exp_1 = get_expression(node.inputs['Color1'], exp_list)
+	exp_2 = get_expression(node.inputs['Color2'], exp_list)
+
+	exp_result = exp_blend(exp_1, exp_2, node.blend_type, exp_list)
 
 	lerp = Node("LinearInterpolate")
 	lerp.push(Node("0", exp_1))
-	lerp.push(Node("1", exp_blend))
+	lerp.push(Node("1", exp_result))
 	exp_fac = get_expression(node.inputs['Fac'], exp_list)
 	lerp.push(Node("2", exp_fac))
 
@@ -432,6 +463,13 @@ def get_expression(field, exp_list):
 			if type(field.default_value) is Euler:
 				exp = exp_vector(field.default_value, exp_list)
 				return {"expression": exp, "OutputIndex": 0}
+		elif field.type == 'SHADER':
+			# same as holdout shader
+			bsdf = {
+				"BaseColor": {"expression": exp_scalar(0.0, exp_list)},
+				"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+			}
+			return bsdf
 		log.error("field has no links, and no default value " + str(field))
 		return None
 	prev_prefix = expression_log_prefix
@@ -503,6 +541,11 @@ def get_expression_inner(field, exp_list):
 			"Refraction": {"expression": exp_scalar(1.0, exp_list)},
 			"Opacity": {"expression": exp_scalar(0.0, exp_list)},
 		}
+	elif node.type == 'BSDF_TRANSLUCENT':
+		log.warn("BSDF_TRANSLUCENT incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+		}
 	elif node.type == 'BSDF_GLASS':
 		log.warn("BSDF_GLASS incomplete implementation")
 		bsdf = {
@@ -516,6 +559,11 @@ def get_expression_inner(field, exp_list):
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	elif node.type == 'SUBSURFACE_SCATTERING':
+		log.warn("node SUBSURFACE_SCATTERING incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list)
 		}
 
 	if bsdf:
@@ -533,10 +581,11 @@ def get_expression_inner(field, exp_list):
 		return {
 			"EmissiveColor": {"expression": mult_exp}
 		}
-	if node.type == 'SUBSURFACE_SCATTERING':
-		log.warn("node SUBSURFACE_SCATTERING incomplete implementation")
+
+	if node.type == 'HOLDOUT':
 		return {
-			"BaseColor": get_expression(node.inputs['Color'], exp_list)
+			"BaseColor": {"expression": exp_scalar(0.0, exp_list)},
+			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 		}
 
 	if node.type == 'ADD_SHADER':
@@ -571,6 +620,7 @@ def get_expression_inner(field, exp_list):
 			else:
 				expressions[name] = exp
 		return expressions
+
 
 	# from here the return type should be {expression:node_idx, OutputIndex: socket_idx}
 	# Add > Input
@@ -706,7 +756,7 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'COMBXYZ':
 	if node.type == 'MATH':
 		exp = exp_math(node, exp_list)
-		return {"expression": exp, "OutputIndex": 0}
+		return exp
 
 	# if node.type == 'RGBTOBW':
 	# if node.type == 'SEPHSV':
@@ -732,7 +782,7 @@ def get_expression_inner(field, exp_list):
 	if node.type == 'REROUTE':
 		return get_expression(node.inputs['Input'], exp_list)
 
-	log.warn("node not handled" + node.type)
+	log.error("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
 	return {"expression": exp}
 
