@@ -6,7 +6,7 @@ import math
 from .data_types import (
 	UDScene, UDActor, UDActorMesh,
 	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
-from mathutils import Matrix
+from mathutils import Matrix, Vector, Euler
 
 import logging
 log = logging.getLogger(__name__)
@@ -31,6 +31,14 @@ matrix_forward = Matrix((
 	(0, 0, 0, 1)
 ))
 
+def exp_vector(value, exp_list):
+	# n = Node("Color", {
+	# nocheckin: may not work
+	n = Node("Color", {
+		# "Name": name,
+		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=1.0)"%tuple(value)
+		})
+	return exp_list.push(n)
 
 def exp_color(value, exp_list, name=""):
 	n = Node("Color", {
@@ -136,8 +144,8 @@ def exp_math(node, exp_list):
 			n.push(Node("4", one)) # A < B
 		elif op == 'GREATER_THAN':
 			n = Node("If")
-			one = exp_scalar(1.0, exp_list)
-			zero = exp_scalar(0.0, exp_list)
+			one = {"expression": exp_scalar(1.0, exp_list)}
+			zero = {"expression": exp_scalar(0.0, exp_list)}
 			n.push(Node("0", in_0)) # A
 			n.push(Node("1", in_1)) # B
 			n.push(Node("2", one)) # A > B
@@ -145,25 +153,56 @@ def exp_math(node, exp_list):
 			n.push(Node("4", zero)) # A < B
 
 	assert n, "unrecognized math operation: %s" % op
-	return exp_list.push(n)
+	exp = exp_list.push(n)
+	return {"expression": exp, "OutputIndex": 0}
 
 op_map_color = {
+# MIX is handled manually
+	'DARKEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Darken",
+# MULTIPLY is handled in op_map
+	'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorBurn",
+	# TODO: check for blender implementation of burn, it could mean this:
+	#'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearBurn",
+	'LIGHTEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Lighten",
+	'SCREEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Screen",
+	'DODGE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorDodge",
 	'OVERLAY': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Overlay",
+# ADD is handled in op_map
+	'SOFT_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_SoftLight",
+	'LINEAR_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearLight",
+	'DIFFERENCE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Difference",
+# SUBTRACT is handled in op_map
+# DIVIDE is handled in op_map
+# HUE is unhandled TODO
+# SATURATION is unhandled
+# COLOR is unhandled
+# VALUE is unhandled
 }
 
-def exp_mixrgb(node, exp_list):
-	op = node.blend_type
-	n = Node("FunctionCall", { "Function": op_map_color[op]})
-	exp_1 = get_expression(node.inputs['Color1'], exp_list)
-	n.push(Node("0", exp_1))
-	exp_2 = get_expression(node.inputs['Color2'], exp_list)
-	n.push(Node("1", exp_2))
+def exp_blend(exp_0, exp_1, blend_type, exp_list):
+	if blend_type == 'MIX':
+		return exp_1
+	n = None
+	if blend_type in {'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'}:
+		n = Node(op_map[blend_type])
+	else:
+		n = Node("FunctionCall", { "Function": op_map_color[blend_type]})
+	assert n
+	n.push(Node("0", exp_0))
+	n.push(Node("1", exp_1))
+	return {"expression": exp_list.push(n)}
 
-	exp_blend = {"expression": exp_list.push(n)}
+
+
+def exp_mixrgb(node, exp_list):
+	exp_1 = get_expression(node.inputs['Color1'], exp_list)
+	exp_2 = get_expression(node.inputs['Color2'], exp_list)
+
+	exp_result = exp_blend(exp_1, exp_2, node.blend_type, exp_list)
 
 	lerp = Node("LinearInterpolate")
 	lerp.push(Node("0", exp_1))
-	lerp.push(Node("1", exp_blend))
+	lerp.push(Node("1", exp_result))
 	exp_fac = get_expression(node.inputs['Fac'], exp_list)
 	lerp.push(Node("2", exp_fac))
 
@@ -201,22 +240,21 @@ def exp_invert(node, exp_list):
 	return exp_list.push(blend)
 
 def exp_mapping(node, exp_list):
-	# 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
+	# TODO: cases for 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
 	n = None
 	if node.vector_type == 'TEXTURE':
 		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingTexture2D"})
 	else: # if node.vector_type == 'POINT':
 		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingPoint2D"})
 
-	location = exp_color((*node.translation, 1), exp_list)
-	rotation = exp_color((*node.rotation, 1), exp_list)
-	scale = exp_color((*node.scale, 1), exp_list)
-
 	input_vector = get_expression(node.inputs['Vector'], exp_list)
+	input_location = get_expression(node.inputs['Location'], exp_list)
+	input_rotation = get_expression(node.inputs['Rotation'], exp_list)
+	input_scale = get_expression(node.inputs['Scale'], exp_list)
 	n.push(Node("0", input_vector))
-	n.push(Node("1", {"expression": location}))
-	n.push(Node("2", {"expression": rotation}))
-	n.push(Node("3", {"expression": scale}))
+	n.push(Node("1", input_location))
+	n.push(Node("2", input_rotation))
+	n.push(Node("3", input_scale))
 
 	return {"expression": exp_list.push(n)}
 
@@ -401,12 +439,16 @@ def get_context():
 	if context_stack:
 		return context_stack[-1]
 
-def get_expression(field, exp_list):
 
+expression_log_prefix = ""
+def get_expression(field, exp_list):
+	global expression_log_prefix
 	# this may return none for fields without default value
-	# most (all?) of the time blender doesn't have default value for vector
+	# most of the time blender doesn't have default value for vector
 	# node inputs, but it does for scalars and colors
 	# TODO: check which cases we should be careful
+	log.warn(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
+
 	if not field.links:
 		if field.type == 'VALUE':
 			exp = exp_scalar(field.default_value, exp_list)
@@ -414,13 +456,27 @@ def get_expression(field, exp_list):
 		elif field.type == 'RGBA':
 			exp = exp_color(field.default_value, exp_list)
 			return {"expression": exp, "OutputIndex": 0}
-		else:
-			log.error("there is no default for field type " + field.type)
-			return None
-
+		elif field.type == 'VECTOR':
+			if type(field.default_value) is Vector:
+				exp = exp_vector(field.default_value, exp_list)
+				return {"expression": exp, "OutputIndex": 0}
+			if type(field.default_value) is Euler:
+				exp = exp_vector(field.default_value, exp_list)
+				return {"expression": exp, "OutputIndex": 0}
+		elif field.type == 'SHADER':
+			# same as holdout shader
+			bsdf = {
+				"BaseColor": {"expression": exp_scalar(0.0, exp_list)},
+				"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+			}
+			return bsdf
+		log.error("field has no links, and no default value " + str(field))
+		return None
+	prev_prefix = expression_log_prefix
+	expression_log_prefix += "|   "
 	# here we are assuming field has links
 	return_exp = get_expression_inner(field, exp_list)
-
+	expression_log_prefix = prev_prefix
 	if not return_exp:
 		pass
 		# previously I did this validation to ensure that stuff is handled...
@@ -485,6 +541,11 @@ def get_expression_inner(field, exp_list):
 			"Refraction": {"expression": exp_scalar(1.0, exp_list)},
 			"Opacity": {"expression": exp_scalar(0.0, exp_list)},
 		}
+	elif node.type == 'BSDF_TRANSLUCENT':
+		log.warn("BSDF_TRANSLUCENT incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+		}
 	elif node.type == 'BSDF_GLASS':
 		log.warn("BSDF_GLASS incomplete implementation")
 		bsdf = {
@@ -492,6 +553,17 @@ def get_expression_inner(field, exp_list):
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
 			"Refraction": get_expression(node.inputs['IOR'], exp_list),
 			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	elif node.type == 'BSDF_HAIR':
+		log.warn("BSDF_HAIR incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	elif node.type == 'SUBSURFACE_SCATTERING':
+		log.warn("node SUBSURFACE_SCATTERING incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list)
 		}
 
 	if bsdf:
@@ -509,10 +581,11 @@ def get_expression_inner(field, exp_list):
 		return {
 			"EmissiveColor": {"expression": mult_exp}
 		}
-	if node.type == 'SUBSURFACE_SCATTERING':
-		log.warn("node SUBSURFACE_SCATTERING incomplete implementation")
+
+	if node.type == 'HOLDOUT':
 		return {
-			"BaseColor": get_expression(node.inputs['Color'], exp_list)
+			"BaseColor": {"expression": exp_scalar(0.0, exp_list)},
+			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 		}
 
 	if node.type == 'ADD_SHADER':
@@ -547,6 +620,7 @@ def get_expression_inner(field, exp_list):
 			else:
 				expressions[name] = exp
 		return expressions
+
 
 	# from here the return type should be {expression:node_idx, OutputIndex: socket_idx}
 	# Add > Input
@@ -682,7 +756,7 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'COMBXYZ':
 	if node.type == 'MATH':
 		exp = exp_math(node, exp_list)
-		return {"expression": exp, "OutputIndex": 0}
+		return exp
 
 	# if node.type == 'RGBTOBW':
 	# if node.type == 'SEPHSV':
@@ -708,12 +782,13 @@ def get_expression_inner(field, exp_list):
 	if node.type == 'REROUTE':
 		return get_expression(node.inputs['Input'], exp_list)
 
-	log.warn("node not handled" + node.type)
+	log.error("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
 	return {"expression": exp}
 
 
 def pbr_nodetree_material(material):
+	log.warn("collecting material:"+material.name)
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
