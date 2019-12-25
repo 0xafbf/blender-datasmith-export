@@ -444,11 +444,11 @@ def get_context():
 
 expression_log_prefix = ""
 def get_expression(field, exp_list):
-	global expression_log_prefix
 	# this may return none for fields without default value
 	# most of the time blender doesn't have default value for vector
 	# node inputs, but it does for scalars and colors
 	# TODO: check which cases we should be careful
+	global expression_log_prefix
 	log.debug(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
 
 	if not field.links:
@@ -474,18 +474,24 @@ def get_expression(field, exp_list):
 			return bsdf
 		log.debug("field has no links, and no default value " + str(field))
 		return None
+
 	prev_prefix = expression_log_prefix
 	expression_log_prefix += "|   "
-	# here we are assuming field has links
 	return_exp = get_expression_inner(field, exp_list)
 	expression_log_prefix = prev_prefix
-	if not return_exp:
-		pass
-		# previously I did this validation to ensure that stuff is handled...
-		# but normal maps work better if left disconnected, so i'm removing this
-		# log.error("didn't get expression from node: %s" % from_node.type)
-		# exp = exp_scalar(0, exp_list)
-		# return {"expression": exp, "OutputIndex": 0}
+
+	# if a color output is connected to a scalar input, average by using dot product
+	if field.type == 'VALUE':
+		other_output = field.links[0].from_socket
+		if other_output.type == 'RGBA' or other_output.type == 'VECTOR':
+			#TODO: check if we should do some colorimetric aware convertion to grayscale
+			n = Node("DotProduct")
+			exp_0 = return_exp
+			n.push(Node("0", exp_0))
+			exp_1 = exp_vector((0.333333, 0.333333, 0.333333), exp_list)
+			n.push(Node("1", {"expression": exp_1}))
+			dot_exp = exp_list.push(n)
+			return_exp = {"expression": dot_exp}
 
 	socket = field.links[0].from_socket
 	reverse_expressions[socket] = return_exp
