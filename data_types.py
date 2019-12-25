@@ -76,9 +76,8 @@ def write_string(io, string):
 	io.write(string_bytes)
 
 def sanitize_name(name):
-	r = name.replace('.', '_dot')
+	r = name.replace('.', '_')
 	return r.replace(' ', '_')
-
 
 def f(x):
 	return '{:6f}'.format(x)
