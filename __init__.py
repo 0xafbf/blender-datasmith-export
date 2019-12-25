@@ -43,10 +43,17 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
 	use_logging: BoolProperty(
-            name="Enable logging",
-            description="Enable logging to Window > System console",
-            default=False,
-            )
+			name="Enable logging",
+			description="Enable logging to Window > System console",
+			default=False,
+			)
+	experimental_tex_mode: BoolProperty(
+			name="Use experimental texture mode mask",
+			description="Exports non-color textures in an unofficial mode to "
+						"keep non-srgb flag in custom UE4 engine builds, "
+						"check readme for more info",
+			default=False,
+			)
 
 	def execute(self, context):
 		keywords = self.as_keywords(ignore=("filter_glob",))

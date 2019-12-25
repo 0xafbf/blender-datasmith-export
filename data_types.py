@@ -9,8 +9,7 @@ import bpy
 from functools import reduce
 
 import logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("bl_datasmith")
 
 def read_array_data(io, data_struct):
 	struct_size = struct.calcsize(data_struct)
@@ -77,7 +76,8 @@ def write_string(io, string):
 	io.write(string_bytes)
 
 def sanitize_name(name):
-	return name.replace('.', '_dot')
+	r = name.replace('.', '_dot')
+	return r.replace(' ', '_')
 
 
 def f(x):
@@ -184,6 +184,7 @@ class UDMesh():
 			# Engine/Source/Developer/Rawmesh
 	def write_to_path(self, path):
 		with open(path, 'wb') as file:
+			log.debug("writing mesh:"+self.name)
 			#write_null(file, 8)
 			file.write(b'\x01\x00\x00\x00\xfd\x04\x00\x00')
 
@@ -211,14 +212,11 @@ class UDMesh():
 
 			# further analysis revealed:
 			# this loops are per triangle
-			print("writing material slots")
 			write_array_data(file, 'I', self.tris_material_slot)
-			print("writing smoothing groups")
 			write_array_data(file, 'I', self.tris_smoothing_group)
 
 
 			# per vertex
-			print("writing vertices")
 			write_array_data(file, 'fff', self.vertices) # VertexPositions
 
 			# b2 = write_array_data(file, 'fff', self.test)
@@ -229,23 +227,16 @@ class UDMesh():
 
 
 			# per vertexloop
-			print("writing triangles")
 			write_array_data(file, 'I', self.triangles) # WedgeIndices
 
 
 			write_null(file, 4) # WedgeTangentX
 			write_null(file, 4) # WedgeTangentY
-			print("writing normals")
 			write_array_data(file, 'fff', self.vertex_normals) # WedgeTangentZ
 
-
-
-
-			print("writing uvs")
 			write_array_data(file, 'ff', self.uvs) # WedgeTexCoords[0]
 
 			write_null(file, 4 * 7) # WedgeTexCoords[1..7]
-			print("writing vertex colors")
 			write_array_data(file, 'BBBB', self.vertex_colors) # WedgeColors
 			# b2 = write_array_data(file, 'BBBB', self.test) # WedgeTexCoords[0]
 
@@ -286,6 +277,7 @@ class UDMesh():
 		return n
 
 	def save(self, basedir, folder_name):
+		log.info("writing mesh:"+self.name)
 		self.relative_path = path.join(folder_name, self.name + '.udsmesh')
 		abs_path = path.join(basedir, self.relative_path)
 		self.write_to_path(abs_path)
@@ -309,6 +301,7 @@ class UDTexture():
 	TEXTURE_MODE_DISPLACE = "4"
 	TEXTURE_MODE_OTHER = "5"
 	TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
+	TEXTURE_MODE_MASK = "7" # experimental texture mode to send with sRGB flag off
 
 	def __init__(self, *, name=None):
 		self.name = name
@@ -316,21 +309,24 @@ class UDTexture():
 		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 		self.normal_map_flag = False
 
+	#this just returns the name without the path
 	def abs_path(self):
 		safe_name = sanitize_name(self.name)
-		ext = "png"
+		ext = ".png"
 		if self.image.file_format == 'JPEG':
-			ext = "jpg"
+			ext = ".jpg"
 		elif self.image.file_format == 'HDR':
-			ext = "hdr"
+			ext = ".hdr"
 		elif self.image.file_format == 'OPEN_EXR':
-			ext = "exr"
-		return "{}/{}.{}".format(UDScene.current_scene.export_path, safe_name, ext)
+			ext = ".exr"
+		return safe_name + ext
 
-	def node(self):
+
+
+	def node(self, folder_name, use_experimental_texture_mode=False):
 		n = Node('Texture')
 		n['name'] = self.name
-		n['file'] = self.abs_path()
+		n['file'] = path.join(folder_name, self.abs_path())
 		n['rgbcurve'] = 0.0
 
 
@@ -340,7 +336,9 @@ class UDTexture():
 		elif self.normal_map_flag:
 			self.texture_mode = UDTexture.TEXTURE_MODE_NORMAL_GREEN_INV
 		elif self.image.colorspace_settings.is_data:
-			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
+			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
+			if use_experimental_texture_mode:
+				self.texture_mode = UDTexture.TEXTURE_MODE_MASK
 		else:
 			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
 
@@ -350,8 +348,9 @@ class UDTexture():
 		n.push(Node('Hash', {'value': self.hash}))
 		return n
 
-	def save(self):
-		image_path = path.join(UDScene.current_scene.basedir, self.abs_path())
+	def save(self, basedir, folder_name):
+		log.info("writing texture:"+self.name)
+		image_path = path.join(basedir, folder_name, self.abs_path())
 		old_path = self.image.filepath_raw
 		self.image.filepath_raw = image_path
 		self.image.save()
@@ -576,67 +575,3 @@ class UDScene():
 		new_object = cls(name=name, **kwargs)
 		group[name] = new_object
 		return new_object
-
-	def node(self):
-		n = Node('DatasmithUnrealScene')
-		n.push(Node('Version', children=['0.22']))
-		n.push(Node('SDKVersion', children=['4.22E0']))
-		n.push(Node('Host', children=['Blender']))
-		n.push(Node('Application', {
-			'Vendor': 'Blender',
-			'ProductName': 'Blender',
-			'ProductVersion': '2.80',
-			}))
-
-		n.push(Node('User', {
-			'ID': '00000000000000000000000000000000',
-			'OS': 'Windows 8.1',
-			}))
-
-		for name, obj in self.objects.items():
-			n.push(obj.node())
-		if self.environment:
-			for env in self.environment:
-				n.push(env)
-		for name, mesh in self.meshes.items():
-			n.push(mesh.node())
-		for mat in self.material_nodes:
-			n.push(mat)
-		for name, tex in self.textures.items():
-			n.push(tex.node())
-
-		return n
-
-	def save(self, basedir, name):
-		self.name = name
-		self.basedir = basedir
-
-		folder_name = name + '_Assets'
-		self.export_path = folder_name
-		# make sure basepath_Assets directory exists
-		try:
-			os.makedirs(path.join(basedir, folder_name))
-		except FileExistsError as e:
-			pass
-
-		for _name, mesh in self.meshes.items():
-			mesh.save(basedir, folder_name)
-		for _name, tex in self.textures.items():
-			tex.save()
-
-		log.info("building XML tree")
-
-		result = self.node().string_rep(first=True)
-
-		pretty_print = False
-		if pretty_print:
-			from xml.dom import minidom
-			result = minidom.parseString(tree).toprettyxml()
-		#pretty_xml = tree
-
-		filename = path.join(basedir, self.name + '.udatasmith')
-		log.info("writing to file")
-		with open(filename, 'w') as f:
-			f.write(result)
-		log.info("export successful")
-

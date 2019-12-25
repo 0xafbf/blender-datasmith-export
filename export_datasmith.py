@@ -3,14 +3,16 @@
 import bpy
 import bmesh
 import math
+import os
+import time
+from os import path
 from .data_types import (
 	UDScene, UDActor, UDActorMesh,
 	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix, Vector, Euler
 
 import logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+log = logging.getLogger("bl_datasmith")
 
 matrix_datasmith = Matrix.Scale(100, 4)
 matrix_datasmith[1][1] *= -1.0
@@ -447,7 +449,7 @@ def get_expression(field, exp_list):
 	# most of the time blender doesn't have default value for vector
 	# node inputs, but it does for scalars and colors
 	# TODO: check which cases we should be careful
-	log.warn(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
+	log.debug(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
 
 	if not field.links:
 		if field.type == 'VALUE':
@@ -470,7 +472,7 @@ def get_expression(field, exp_list):
 				"Roughness": {"expression": exp_scalar(1.0, exp_list)},
 			}
 			return bsdf
-		log.error("field has no links, and no default value " + str(field))
+		log.debug("field has no links, and no default value " + str(field))
 		return None
 	prev_prefix = expression_log_prefix
 	expression_log_prefix += "|   "
@@ -515,12 +517,14 @@ def get_expression_inner(field, exp_list):
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+			"Metallic": {"expression": exp_scalar(0.0, exp_list)},
 		}
 	elif node.type == 'BSDF_TOON':
 		log.warn("BSDF_TOON incomplete implementation")
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
 			"Roughness": {"expression": exp_scalar(1.0, exp_list)},
+			"Metallic": {"expression": exp_scalar(0.0, exp_list)},
 		}
 	elif node.type == 'BSDF_GLOSSY':
 		bsdf = {
@@ -788,7 +792,7 @@ def get_expression_inner(field, exp_list):
 
 
 def pbr_nodetree_material(material):
-	log.warn("collecting material:"+material.name)
+	log.info("collecting material:"+material.name)
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
@@ -1057,6 +1061,10 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 				or bl_light.shape == 'ELLIPSE'):
 				light_shape = 'Disc'
 
+			# light_shape fills the light with geometry, so better set none instead
+			light_shape = 'None'
+
+
 			uobj.shape = Node('Shape', {
 				"type": light_shape, # can be Rectangle, Disc, Sphere, Cylinder, None
 				"width": size_w * 100, # convert to cm
@@ -1160,8 +1168,30 @@ def collect_environment(world):
 	return [n, n2]
 
 
+
+def get_file_header():
+
+	n = Node('DatasmithUnrealScene')
+	n.push(Node('Version', children=['0.22']))
+	n.push(Node('SDKVersion', children=['4.22E0']))
+	n.push(Node('Host', children=['Blender']))
+	n.push(Node('Application', {
+		'Vendor': 'Blender',
+		'ProductName': 'Blender',
+		'ProductVersion': '2.80',
+		}))
+
+	n.push(Node('User', {
+		'ID': '00000000000000000000000000000000',
+		'OS': 'Windows 8.1',
+		}))
+	return n
+
 curve_list = []
-def collect_to_uscene(context):
+def collect_and_save(context, args, save_path):
+
+	start_time = time.monotonic()
+
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
 
@@ -1201,7 +1231,57 @@ def collect_to_uscene(context):
 	texture = UDScene.current_scene.get_field(UDTexture, "datasmith_curves")
 	texture.image = curves_image
 
-	return uscene
+	log.info("finished collecting, now saving")
+
+	basedir, file_name = path.split(save_path)
+	folder_name = file_name + '_Assets'
+	# make sure basepath_Assets directory exists
+	try:
+		os.makedirs(path.join(basedir, folder_name))
+	except FileExistsError as e:
+		pass
+
+	log.info("writing meshes")
+	for _name, mesh in uscene.meshes.items():
+		mesh.save(basedir, folder_name)
+
+	log.info("writing textures")
+	for _name, tex in uscene.textures.items():
+		tex.save(basedir, folder_name)
+
+	log.info("building XML tree")
+
+	n = get_file_header()
+	for name, obj in uscene.objects.items():
+		n.push(obj.node())
+	if uscene.environment:
+		for env in uscene.environment:
+			n.push(env)
+	for name, mesh in uscene.meshes.items():
+		n.push(mesh.node())
+	for mat in uscene.material_nodes:
+		n.push(mat)
+
+	use_experimental_tex_mode = args["experimental_tex_mode"]
+	print("Using experimental tex mode:%s", use_experimental_tex_mode)
+	for name, tex in uscene.textures.items():
+		n.push(tex.node(folder_name, use_experimental_tex_mode))
+
+	end_time = time.monotonic()
+	total_time = end_time - start_time
+
+	log.info("preparing data took:%f"%total_time)
+
+	result = n.string_rep(first=True)
+
+	log.info("writing to file")
+	filename = path.join(basedir, file_name + '.udatasmith')
+	with open(filename, 'w') as f:
+		f.write(result)
+	log.info("export successful")
+
+
+	UDScene.current_scene = None # FIXME
 
 def save(context,*, filepath, **kwargs):
 
@@ -1215,19 +1295,15 @@ def save(context,*, filepath, **kwargs):
 		log.addHandler(handler)
 
 	try:
-
 		from os import path
 		basepath, ext = path.splitext(filepath)
-		basedir, basename = path.split(basepath)
 
-		log.info("Starting collection of scene")
-		scene = collect_to_uscene(bpy.context)
-		log.info("finished collecting, now saving")
-		scene.save(basedir, basename)
-
-		UDScene.current_scene = None # FIXME
+		log.info("Starting Datasmith Export")
+		collect_and_save(context, kwargs, basepath)
+		log.info("Finished Datasmith Export")
 
 	except Exception as error:
+		log.error("Datasmith export error:")
 		log.error(error)
 		raise
 
