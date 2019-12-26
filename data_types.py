@@ -480,8 +480,9 @@ class UDActorLight(UDActor):
 	def __init__(self, *, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
 		super().__init__(node=node, name=name)
 		self.type = light_type
-		self.intensity = 1500
-		self.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
+		self.intensity = 1000
+		self.attenuation_radius = 1000
+		self.intensity_units = UDActorLight.LIGHT_UNIT_LUMENS
 		self.color = color
 		self.inner_cone_angle = 22.5
 		self.outer_cone_angle = 25
@@ -498,6 +499,8 @@ class UDActorLight(UDActor):
 		n['enabled'] = '1'
 		val = node_value
 		n.push(val('Intensity', self.intensity))
+		# using attenuation radius = light energy gives a good radius as result
+		n.push(val('AttenuationRadius', self.attenuation_radius))
 		n.push(Node('IntensityUnits', {'value': self.intensity_units}))
 		n.push(Node('Color', {
 			'usetemp': '0',

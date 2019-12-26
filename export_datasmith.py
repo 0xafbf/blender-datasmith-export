@@ -1039,7 +1039,7 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		# uobj.sensor_aspect_ratio = 1.777778
 		uobj.enable_dof = bl_cam.dof.use_dof
 		if uobj.enable_dof:
-			uobj.focus_distance = bl_cam.dof.focus_distance
+			uobj.focus_distance = bl_cam.dof.focus_distance * 100 # to centimeters
 			if bl_cam.dof.focus_object:
 				# TODO test this, I don't know if this look_at_actor
 				# is for focus or for rotating the camera.
@@ -1060,11 +1060,19 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 			log.warn("unsupported: using nodetree for light " + bl_obj.name)
 		else:
 			uobj.color = bl_light.color
-			uobj.intensity = bl_light.energy * 0.08 # came up with this constant by brute force
-			# blender watts unit match ue4 lumens unit, but in spot lights the brightness
-			# changes with the spot angle when using lumens while candelas do not.
+			uobj.intensity_units = UDActorLight.LIGHT_UNIT_LUMENS
+			uobj.intensity = bl_light.energy
+			if bl_light.type == 'SPOT':
+				uobj.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
 
-			uobj.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
+				uobj.intensity = bl_light.energy * 0.08 # came up with this constant by brute force
+				# blender watts unit match ue4 lumens unit, but in spot lights the brightness
+				# changes with the spot angle when using lumens while candelas do not.
+				# TODO: put this behind a flag, and maybe docs
+
+
+		# this seems to give a good result
+		uobj.attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
 
 		if bl_light.type == 'SUN':
 			uobj.intensity = bl_light.energy # suns are in lux
@@ -1072,18 +1080,21 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		elif bl_light.type == 'AREA':
 			uobj.type = UDActorLight.LIGHT_AREA
 
+
 			size_w = size_h = bl_light.size
 			if (bl_light.shape == 'RECTANGLE'
 				or bl_light.shape == 'ELLIPSE'):
 				size_h = bl_light.size_y
 
-			light_shape = 'Rectangle'
-			if (bl_light.shape == 'DISK'
-				or bl_light.shape == 'ELLIPSE'):
-				light_shape = 'Disc'
+
 
 			# light_shape fills the light with geometry, so better set none instead
 			light_shape = 'None'
+			# light_shape = 'Rectangle'
+			# if (bl_light.shape == 'DISK'
+			# 	or bl_light.shape == 'ELLIPSE'):
+			# 	light_shape = 'Disc'
+
 
 
 			uobj.shape = Node('Shape', {
