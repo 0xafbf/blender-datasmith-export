@@ -560,8 +560,6 @@ class UDScene():
 	def __init__(self, source=None):
 		self.name = 'udscene_name'
 
-		self.materials = set()
-		self.material_nodes = []
 		self.meshes = {}
 		self.objects = {}
 		self.textures = {}

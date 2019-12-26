@@ -234,7 +234,7 @@ def exp_hsv(node, exp_list):
 	n.push(Node("3", exp_fac))
 	exp_color = get_expression(node.inputs['Color'], exp_list)
 	n.push(Node("4", exp_color))
-	# TODO: test in unreal if I have an expression with two imputs which
+	# TODO: test in unreal if I have an expression with two inputs which
 	# one takes place, if it crashes or what
 	return exp_list.push(n)
 
@@ -1026,8 +1026,9 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		kwargs['name'] = name_override
 
 	if bl_obj.type == 'MESH':
-
-		uscene.materials |= {slot.material for slot in bl_obj.material_slots}
+		material_list = datasmith_context["materials"]
+		for slot in bl_obj.material_slots:
+			material_list.append(slot.material)
 
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
@@ -1231,9 +1232,16 @@ def get_file_header():
 	return n
 
 curve_list = []
+datasmith_context = None
 def collect_and_save(context, args, save_path):
 
 	start_time = time.monotonic()
+
+	global datasmith_context
+	datasmith_context = {
+		"objects": [],
+		"materials": []
+	}
 
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
@@ -1245,12 +1253,17 @@ def collect_and_save(context, args, save_path):
 		uobj = collect_object(obj, uscene, context=context)
 		uscene.objects[uobj.name] = uobj
 
-	uscene.environment = collect_environment(context.scene.world)
 
 	global curve_list
 	curve_list = []
 	log.info("collecting materials")
-	uscene.material_nodes = [collect_pbr_material(mat) for mat in uscene.materials]
+	materials = datasmith_context["materials"]
+	unique_materials = []
+	for material in materials:
+		if material in unique_materials:
+			continue
+		unique_materials.append(material)
+	material_nodes = [collect_pbr_material(mat) for mat in unique_materials]
 
 	log.info("baking curves")
 	log.info("curves: "+str(len(curve_list)))
@@ -1297,12 +1310,15 @@ def collect_and_save(context, args, save_path):
 	n = get_file_header()
 	for name, obj in uscene.objects.items():
 		n.push(obj.node())
-	if uscene.environment:
-		for env in uscene.environment:
+
+	environment = collect_environment(context.scene.world)
+	if environment:
+		for env in environment:
 			n.push(env)
+
 	for name, mesh in uscene.meshes.items():
 		n.push(mesh.node())
-	for mat in uscene.material_nodes:
+	for mat in material_nodes:
 		n.push(mat)
 
 	use_experimental_tex_mode = args["experimental_tex_mode"]
