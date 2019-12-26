@@ -210,9 +210,20 @@ def exp_mixrgb(node, exp_list):
 
 	return exp_list.push(lerp)
 
+op_custom_functions = {
+	"HUE_SAT":   "/BlenderDatasmithAdditions/MaterialFunctions/AdjustHSV",
+	"MAPPING_TEX2D": "/BlenderDatasmithAdditions/MaterialFunctions/MappingTexture2D",
+	"MAPPING_POINT2D": "/BlenderDatasmithAdditions/MaterialFunctions/MappingPoint2D",
+	"LAYER_WEIGHT": "/BlenderDatasmithAdditions/MaterialFunctions/LayerWeight",
+	"CURVE_RGB": "/BlenderDatasmithAdditions/MaterialFunctions/RGBCurveLookup",
+	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
+	"FRESNEL": "/BlenderDatasmithAdditions/MaterialFunctions/BlenderFresnel",
+}
+
+
 # TODO: this depends on having the material functions in UE4
 def exp_hsv(node, exp_list):
-	n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/AdjustHSV"})
+	n = Node("FunctionCall", { "Function": op_custom_functions["HUE_SAT"]})
 	exp_hue = get_expression(node.inputs['Hue'], exp_list)
 	n.push(Node("0", exp_hue))
 	exp_sat = get_expression(node.inputs['Saturation'], exp_list)
@@ -244,10 +255,10 @@ def exp_invert(node, exp_list):
 def exp_mapping(node, exp_list):
 	# TODO: cases for 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
 	n = None
+	mapping_type = 'MAPPING_POINT2D'
 	if node.vector_type == 'TEXTURE':
-		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingTexture2D"})
-	else: # if node.vector_type == 'POINT':
-		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/MappingPoint2D"})
+		mapping_type = 'MAPPING_TEX2D'
+	n = Node("FunctionCall", { "Function": op_custom_functions[mapping_type]})
 
 	input_vector = get_expression(node.inputs['Vector'], exp_list)
 	input_location = get_expression(node.inputs['Location'], exp_list)
@@ -266,7 +277,7 @@ def exp_layer_weight(socket, exp_list):
 		expr = reverse_expressions[socket.node]
 	else:
 		exp_blend = get_expression(socket.node.inputs['Blend'], exp_list)
-		n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/LayerWeight"})
+		n = Node("FunctionCall", { "Function": op_custom_functions['LAYER_WEIGHT']})
 		n.push(Node("0", exp_blend))
 		expr = exp_list.push(n)
 		reverse_expressions[socket.node] = expr
@@ -345,7 +356,7 @@ def exp_curvergb(from_node, exp_list):
 
 	texture = exp_texture_object("datasmith_curves", exp_list)
 
-	lookup = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/RGBCurveLookup"})
+	lookup = Node("FunctionCall", { "Function": op_custom_functions["CURVE_RGB"]})
 	lookup.push(Node("0", color))
 	lookup.push(Node("1", {"expression": curve_v}))
 	lookup.push(Node("2", {"expression": texture}))
@@ -382,7 +393,7 @@ def exp_bump(node, exp_list):
 			texture.image = image
 
 			image_object = exp_texture_object(name, exp_list)
-			bump_node = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap"})
+			bump_node = Node("FunctionCall", { "Function": op_custom_functions["NORMAL_FROM_HEIGHT"]})
 			bump_node.push(Node("0", {"expression": image_object}))
 			bump_node.push(Node("1", get_expression(node.inputs['Strength'], exp_list)))
 			bump_node.push(Node("2", get_expression(node.inputs['Distance'], exp_list)))
@@ -424,7 +435,7 @@ def exp_group_input(socket, exp_list):
 	return outer_expression
 
 def exp_fresnel(node, exp_list):
-	n = Node("FunctionCall", { "Function": "/BlenderDatasmithAdditions/BlenderAdditions/BlenderFresnel"})
+	n = Node("FunctionCall", { "Function": op_custom_functions["FRESNEL"]})
 	exp_ior = get_expression(node.inputs['IOR'], exp_list)
 	n.push(Node("0", exp_ior))
 	return exp_list.push(n)
