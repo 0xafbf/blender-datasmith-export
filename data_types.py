@@ -138,20 +138,11 @@ def node_value(name, value):
 
 
 class UDMesh():
-	node_type = 'StaticMesh'
 	node_group = 'meshes'
 
-	def __init__(self, path=None, node:ElementTree.Element = None, name=None):
+	def __init__(self, name):
 		self.name = name
-		if path:
-			self.init_with_path(path)
 
-		else:
-			self.init_fields()
-
-		self.check_fields() # to test if it is possible for these fields to have different values
-
-	def init_fields(self):
 		self.source_models = 'SourceModels'
 		self.struct_property = 'StructProperty'
 		self.datasmith_mesh_source_model = 'DatasmithMeshSourceModel'
@@ -171,16 +162,8 @@ class UDMesh():
 		self.relative_path = None
 		self.hash = ''
 
-
-	def check_fields(self):
-		assert self.name != None
-		assert self.source_models == 'SourceModels'
-		assert self.struct_property == 'StructProperty'
-		assert self.datasmith_mesh_source_model == 'DatasmithMeshSourceModel'
-
-
-			# this may need some work, found some documentation:
-			# Engine/Source/Developer/Rawmesh
+	# this may need some work, found some documentation:
+	# Engine/Source/Developer/Rawmesh
 	def write_to_path(self, path):
 		with open(path, 'wb') as file:
 			log.debug("writing mesh:"+self.name)
@@ -276,7 +259,7 @@ class UDMesh():
 		return n
 
 	def save(self, basedir, folder_name):
-		log.info("writing mesh:"+self.name)
+		log.debug("writing mesh:"+self.name)
 		self.relative_path = path.join(folder_name, self.name + '.udsmesh')
 		abs_path = path.join(basedir, self.relative_path)
 		self.write_to_path(abs_path)
@@ -290,7 +273,6 @@ class UDMesh():
 
 
 class UDTexture():
-	node_type = 'Texture'
 	node_group = 'textures'
 
 	TEXTURE_MODE_DIFFUSE = "0"
@@ -302,7 +284,7 @@ class UDTexture():
 	TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
 	TEXTURE_MODE_MASK = "7" # experimental texture mode to send with sRGB flag off
 
-	def __init__(self, *, name=None):
+	def __init__(self, name):
 		self.name = name
 		self.image = None
 		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
@@ -348,7 +330,7 @@ class UDTexture():
 		return n
 
 	def save(self, basedir, folder_name):
-		log.info("writing texture:"+self.name)
+		log.debug("writing texture:"+self.name)
 		image_path = path.join(basedir, folder_name, self.abs_path())
 		old_path = self.image.filepath_raw
 		self.image.filepath_raw = image_path
@@ -365,20 +347,6 @@ class UDTexture():
 
 class UDActor():
 
-	node_type = 'Actor'
-	node_group = 'objects'
-
-	def get_field(self, cls, name, **kwargs):
-		group = getattr(self, cls.node_group)
-		if not group:
-			log.error("trying to get invalid group")
-
-		if name in group:
-			return group[name]
-
-		new_object = cls(name=name, **kwargs)
-		group[name] = new_object
-		return new_object
 
 	class Transform():
 		def __init__(self, tx=0, ty=0, tz=0,
@@ -442,7 +410,6 @@ class UDActor():
 
 class UDActorMesh(UDActor):
 
-	node_type = 'ActorMesh'
 
 	def __init__(self, *, name=None):
 		self.mesh = None
@@ -462,7 +429,6 @@ class UDActorMesh(UDActor):
 
 class UDActorLight(UDActor):
 
-	node_type = 'Light'
 
 	LIGHT_POINT = 'PointLight'
 	LIGHT_SPOT = 'SpotLight'
@@ -521,7 +487,6 @@ class UDActorLight(UDActor):
 
 class UDActorCamera(UDActor):
 
-	node_type = 'Camera'
 
 	def __init__(self, *, node=None, name=None):
 		super().__init__(node=node, name=name)
@@ -554,7 +519,6 @@ class UDActorCamera(UDActor):
 
 class UDScene():
 
-	node_type = 'DatasmithUnrealScene'
 	current_scene = None
 
 	def __init__(self, source=None):
@@ -563,15 +527,13 @@ class UDScene():
 		self.meshes = {}
 		self.objects = {}
 		self.textures = {}
-		self.environment = None
 
-
-	def get_field(self, cls, name, **kwargs):
+	def get_field(self, cls, name):
 		group = getattr(self, cls.node_group)
 
 		if name in group:
 			return group[name]
 
-		new_object = cls(name=name, **kwargs)
+		new_object = cls(name=name)
 		group[name] = new_object
 		return new_object

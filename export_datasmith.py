@@ -292,13 +292,17 @@ def exp_layer_weight(socket, exp_list):
 	return {"expression": expr, "OutputIndex": 0}
 
 
+def add_material_curve(curve):
+	curves = datasmith_context["material_curves"]
+	idx = len(curves)
+	curves.append(curve)
+	return idx
+
 def exp_color_ramp(from_node, exp_list):
 	ramp = from_node.color_ramp
 	values = [ramp.evaluate(idx/255) for idx in range(256)]
 
-	idx = len(curve_list)
-	curve_list.append(values)
-	log.warn("new curve" + str(idx))
+	idx = add_material_curve(values)
 
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
@@ -336,8 +340,7 @@ def exp_curvergb(from_node, exp_list):
 	) # the curves[3] is a global multiplier, not an alpha
 	values = [ev(idx/255) for idx in range(256)]
 
-	idx = len(curve_list)
-	curve_list.append(values)
+	idx = add_material_curve(values)
 
 	factor = get_expression(from_node.inputs['Fac'], exp_list)
 	color = get_expression(from_node.inputs['Color'], exp_list)
@@ -380,6 +383,7 @@ def exp_texture_object(name, exp_list):
 	}))
 	return exp_list.push(n)
 
+
 def exp_bump(node, exp_list):
 	height_input = node.inputs['Height']
 	if height_input.links:
@@ -389,7 +393,7 @@ def exp_bump(node, exp_list):
 			name = sanitize_name(image.name)
 
 			# ensure that texture is exported
-			texture = UDScene.current_scene.get_field(UDTexture, name)
+			texture = get_or_create_texture(name)
 			texture.image = image
 
 			image_object = exp_texture_object(name, exp_list)
@@ -716,7 +720,7 @@ def get_expression_inner(field, exp_list):
 			name = sanitize_name(image.name) # name_full?
 
 			# ensure that texture is exported
-			texture = UDScene.current_scene.get_field(UDTexture, name)
+			texture = get_or_create_texture(name)
 			if (get_context() == 'NORMAL'):
 				texture.normal_map_flag = True
 
@@ -824,7 +828,7 @@ def get_expression_inner(field, exp_list):
 
 
 def pbr_nodetree_material(material):
-	log.info("collecting material:"+material.name)
+	log.debug("collecting material:"+material.name)
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
@@ -848,7 +852,8 @@ def pbr_nodetree_material(material):
 	for key, value in expressions.items():
 		n.push(Node(key, value))
 
-	# apparently this happens automatically
+	# apparently this happens automatically, we may want to
+	# choose if we export with masked blend mode
 	#if "Opacity" in expressions:
 	#	n.push(Node("Blendmode", {"value": "2.0"}))
 
@@ -930,6 +935,8 @@ def mesh_copy_triangulated(bl_mesh):
 	m.calc_normals_split()
 	return m
 
+
+
 def collect_mesh(bl_mesh, uscene):
 
 	# when using linked libraries, some meshes can have the same name
@@ -942,14 +949,13 @@ def collect_mesh(bl_mesh, uscene):
 			prefix = prefix[:-6] + '_'
 		mesh_name = prefix + mesh_name
 
-	umesh = uscene.get_field(UDMesh, name=mesh_name)
+	umesh = get_or_create_mesh(mesh_name)
 	if len(umesh.vertices) > 0:
 		# mesh already processed
 		return umesh
 	# create copy to triangulate
 
 	m = mesh_copy_triangulated(bl_mesh)
-
 
 	for idx, mat in enumerate(bl_mesh.materials):
 	    umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
@@ -1164,7 +1170,6 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 
 	return uobj
 
-
 def collect_environment(world):
 
 	log.info("Collecting environment")
@@ -1184,7 +1189,7 @@ def collect_environment(world):
 	image = source_node.image
 
 	tex_name = sanitize_name(image.name)
-	texture = UDScene.current_scene.get_field(UDTexture, tex_name)
+	texture = get_or_create_texture(tex_name)
 	texture.image = image
 
 	tex_node = Node("Texture", {
@@ -1208,7 +1213,6 @@ def collect_environment(world):
 		"enabled": "0"
 		}))
 
-
 	return [n, n2]
 
 
@@ -1231,7 +1235,15 @@ def get_file_header():
 		}))
 	return n
 
-curve_list = []
+
+def get_or_create_texture(name):
+	utex = UDScene.current_scene.get_field(UDTexture, name)
+	return utex
+
+def get_or_create_mesh(name):
+	umesh = UDScene.current_scene.get_field(UDMesh, name)
+	return umesh
+
 datasmith_context = None
 def collect_and_save(context, args, save_path):
 
@@ -1240,7 +1252,10 @@ def collect_and_save(context, args, save_path):
 	global datasmith_context
 	datasmith_context = {
 		"objects": [],
-		"materials": []
+		"textures": [],
+		"meshes": [],
+		"materials": [],
+		"material_curves": [],
 	}
 
 	all_objects = context.scene.objects
@@ -1253,9 +1268,6 @@ def collect_and_save(context, args, save_path):
 		uobj = collect_object(obj, uscene, context=context)
 		uscene.objects[uobj.name] = uobj
 
-
-	global curve_list
-	curve_list = []
 	log.info("collecting materials")
 	materials = datasmith_context["materials"]
 	unique_materials = []
@@ -1266,7 +1278,6 @@ def collect_and_save(context, args, save_path):
 	material_nodes = [collect_pbr_material(mat) for mat in unique_materials]
 
 	log.info("baking curves")
-	log.info("curves: "+str(len(curve_list)))
 	curves_image = None
 	if "datasmith_curves" in bpy.data.images:
 		curves_image = bpy.data.images["datasmith_curves"]
@@ -1275,6 +1286,8 @@ def collect_and_save(context, args, save_path):
 		curves_image.colorspace_settings.is_data = True
 
 	pixels = curves_image.pixels
+	curve_list = datasmith_context["material_curves"]
+	log.info("curves: "+str(len(curve_list)))
 	for idx, curve in enumerate(curve_list):
 		row_idx = (255-idx) * 256
 		for i in range(256):
@@ -1284,7 +1297,7 @@ def collect_and_save(context, args, save_path):
 			pixels[pixel_idx+2] = curve[i][2]
 			pixels[pixel_idx+3] = curve[i][3]
 
-	texture = UDScene.current_scene.get_field(UDTexture, "datasmith_curves")
+	texture = get_or_create_texture("datasmith_curves")
 	texture.image = curves_image
 
 	log.info("finished collecting, now saving")
