@@ -360,17 +360,17 @@ class UDActor():
 		if len(self.objects) > 0:
 			children_node = Node("children");
 			for name, child in self.objects.items():
-				children_node.push(child.node())
+				children_node.push(child)
 			n.push(children_node)
 		return n
 
 
 class UDActorMesh(UDActor):
 
-	def __init__(self, *, name=None):
+	def __init__(self, name=None):
 		self.mesh = None
 		self.materials = {}
-		super().__init__( name=name)
+		super().__init__(name=name)
 
 	def node(self):
 		n = super().node()
@@ -381,59 +381,3 @@ class UDActorMesh(UDActor):
 			n.push(Node('material', {'id':idx, 'name':m}))
 
 		return n
-
-
-class UDActorLight(UDActor):
-
-	LIGHT_POINT = 'PointLight'
-	LIGHT_SPOT = 'SpotLight'
-	LIGHT_SUN = 'DirectionalLight'
-	LIGHT_AREA = 'AreaLight'
-
-	# By default, all lights use unitless
-	# Area lights use lumens
-	# directional lights don't write intensityunits
-	LIGHT_UNIT_CANDELAS = 'Candelas'
-	LIGHT_UNIT_LUMENS = 'Lumens'
-	LIGHT_UNIT_UNITLESS = 'Unitless'
-
-	def __init__(self, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
-		super().__init__(name=name)
-		self.type = light_type
-		self.intensity = 1000
-		self.attenuation_radius = 1000
-		self.intensity_units = UDActorLight.LIGHT_UNIT_LUMENS
-		self.color = color
-		self.inner_cone_angle = 22.5
-		self.outer_cone_angle = 25
-		self.shape = None
-		self.node_props = []
-		self.post = []
-
-	def node(self):
-		n = super().node()
-		n.name = 'Light'
-		n['type'] = self.type
-		n['enabled'] = '1'
-		val = node_value
-		n.push(val('Intensity', self.intensity))
-		# using attenuation radius = light energy gives a good radius as result
-		n.push(val('AttenuationRadius', self.attenuation_radius))
-		n.push(Node('IntensityUnits', {'value': self.intensity_units}))
-		n.push(Node('Color', {
-			'usetemp': '0',
-			'temperature': '6500.0',
-			'R': f(self.color[0]),
-			'G': f(self.color[1]),
-			'B': f(self.color[2]),
-			}))
-		if (self.type == UDActorLight.LIGHT_SPOT
-			or self.type == UDActorLight.LIGHT_AREA):
-			n.push(val('InnerConeAngle', self.inner_cone_angle))
-			n.push(val('OuterConeAngle', self.outer_cone_angle))
-		if self.shape:
-			n.push(self.shape)
-		for prop in self.node_props:
-			n.push(prop)
-		return n
-

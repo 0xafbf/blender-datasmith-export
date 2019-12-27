@@ -8,7 +8,7 @@ import time
 from os import path
 from .data_types import (
 	UDActor, UDActorMesh,
-	UDActorLight, UDMesh, Node, UDTexture, sanitize_name)
+	UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -17,8 +17,6 @@ log = logging.getLogger("bl_datasmith")
 matrix_datasmith = Matrix.Scale(100, 4)
 matrix_datasmith[1][1] *= -1.0
 
-matrix_normals2 = Matrix.Scale(-1, 4)
-#matrix_normals[1][1] = -1
 matrix_normals = [
 	[-1, 0, 0],
 	[0, -1, 0],
@@ -1027,9 +1025,9 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 	uobj = None
 
 	kwargs = {}
-	kwargs['name'] = bl_obj.name
+	obj_name = bl_obj.name
 	if name_override:
-		kwargs['name'] = name_override
+		obj_name = name_override
 
 	if bl_obj.type == 'MESH':
 		material_list = datasmith_context["materials"]
@@ -1038,7 +1036,7 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
-			uobj = UDActorMesh(**kwargs)
+			uobj = UDActorMesh(obj_name)
 			umesh = collect_mesh(bl_obj.data)
 			uobj.mesh = umesh.name
 			for idx, slot in enumerate(bl_obj.material_slots):
@@ -1047,77 +1045,10 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 					uobj.materials[idx] = sanitize_name(slot.material.name)
 
 		else: # if is a mesh with no polys, treat as empty
-			uobj = UDActor(**kwargs)
-
-	elif bl_obj.type == 'LIGHT':
-		uobj = UDActorLight(**kwargs)
-		bl_light = bl_obj.data
-
-		if bl_light.use_nodes and bl_light.node_tree:
-
-			node = bl_light.node_tree.nodes['Emission']
-			uobj.color = node.inputs['Color'].default_value
-			uobj.intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
-			log.warn("unsupported: using nodetree for light " + bl_obj.name)
-		else:
-			uobj.color = bl_light.color
-			uobj.intensity_units = UDActorLight.LIGHT_UNIT_LUMENS
-			uobj.intensity = bl_light.energy
-			if bl_light.type == 'SPOT':
-				uobj.intensity_units = UDActorLight.LIGHT_UNIT_CANDELAS
-
-				uobj.intensity = bl_light.energy * 0.08 # came up with this constant by brute force
-				# blender watts unit match ue4 lumens unit, but in spot lights the brightness
-				# changes with the spot angle when using lumens while candelas do not.
-				# TODO: put this behind a flag, and maybe docs
-
-		# this seems to give a good result
-		uobj.attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
-
-		if bl_light.type == 'SUN':
-			uobj.intensity = bl_light.energy # suns are in lux
-			uobj.type = UDActorLight.LIGHT_SUN
-		elif bl_light.type == 'AREA':
-			uobj.type = UDActorLight.LIGHT_AREA
-
-
-			size_w = size_h = bl_light.size
-			if (bl_light.shape == 'RECTANGLE'
-				or bl_light.shape == 'ELLIPSE'):
-				size_h = bl_light.size_y
-
-			# light_shape fills the light with geometry, so better set none instead
-			light_shape = 'None'
-			# light_shape = 'Rectangle'
-			# if (bl_light.shape == 'DISK'
-			# 	or bl_light.shape == 'ELLIPSE'):
-			# 	light_shape = 'Disc'
-
-			uobj.shape = Node('Shape', {
-				"type": light_shape, # can be Rectangle, Disc, Sphere, Cylinder, None
-				"width": size_w * 100, # convert to cm
-				"length": size_h * 100,
-				"LightType": "Rect", # can be "Point", "Spot", "Rect"
-				})
-
-		uobj.node_props.append(
-			Node('SourceSize', {
-				"value": bl_light.shadow_soft_size * 100,
-				}
-			)
-		)
-
-		if bl_light.type == 'POINT':
-			uobj.type = UDActorLight.LIGHT_POINT
-		elif bl_light.type == 'SPOT':
-			uobj.type = UDActorLight.LIGHT_SPOT
-			angle = bl_light.spot_size * 180 / (2*math.pi)
-			uobj.outer_cone_angle = angle
-			inner_angle = angle * (1 - bl_light.spot_blend)
-			uobj.inner_cone_angle = inner_angle if inner_angle > 0.0001 else 0.0001
+			uobj = UDActor(obj_name)
 
 	else: # maybe empties
-		uobj = UDActor(**kwargs)
+		uobj = UDActor(obj_name)
 
 	mat_basis = bl_obj.matrix_world
 	if dupli_matrix:
@@ -1166,10 +1097,76 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 		n.push(node_value('FocalLength', bl_cam.lens))
 		n.push(Node('Post'))
 
+	elif bl_obj.type == 'LIGHT':
+		bl_light = bl_obj.data
+
+		n.name = 'Light'
+		n['type'] = 'PointLight'
+		n['enabled'] = '1'
+		n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
+		light_intensity = bl_light.energy
+		light_attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
+		light_color = bl_light.color
+		light_intensity_units = 'Lumens' # can also be 'Candelas' or 'Unitless'
+
+		if bl_light.type == 'SUN':
+			n['type'] = 'DirectionalLight'
+			# light_intensity = bl_light.energy # suns are in lux
+
+		elif bl_light.type == 'SPOT':
+			n['type'] = 'SpotLight'
+			outer_cone_angle = bl_light.spot_size * 180 / (2*math.pi)
+			inner_cone_angle = outer_cone_angle * (1 - bl_light.spot_blend)
+			if inner_cone_angle < 0.0001:
+				inner_cone_angle = 0.0001
+			n.push(node_value('InnerConeAngle', inner_cone_angle))
+			n.push(node_value('OuterConeAngle', outer_cone_angle))
+
+			spot_use_candelas = False # TODO: test this thoroughly
+			if spot_use_candelas:
+				light_intensity_units = 'Candelas'
+				light_intensity = bl_light.energy * 0.08 # came up with this constant by brute force
+				# blender watts unit match ue4 lumens unit, but in spot lights the brightness
+				# changes with the spot angle when using lumens while candelas do not.
+
+		elif bl_light.type == 'AREA':
+			n['type'] = 'AreaLight'
+
+			size_w = size_h = bl_light.size
+			if bl_light.shape == 'RECTANGLE' or bl_light.shape == 'ELLIPSE':
+				size_h = bl_light.size_y
+
+			n.push(Node('Shape', {
+				"type": 'None', # can be Rectangle, Disc, Sphere, Cylinder, None
+				"width": size_w * 100, # convert to cm
+				"length": size_h * 100,
+				"LightType": "Rect", # can be "Point", "Spot", "Rect"
+			}))
+
+		if bl_light.use_nodes and bl_light.node_tree:
+
+			node = bl_light.node_tree.nodes['Emission']
+			light_color = node.inputs['Color'].default_value
+			light_intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+			log.error("unsupported: using nodetree for light " + bl_obj.name)
+
+		n.push(node_value('Intensity', light_intensity))
+		n.push(node_value('AttenuationRadius', light_attenuation_radius))
+		n.push(Node('IntensityUnits', {'value': light_intensity_units}))
+		n.push(Node('Color', {
+			'usetemp': '0',
+			'temperature': '6500.0',
+			'R': f(light_color[0]),
+			'G': f(light_color[1]),
+			'B': f(light_color[2]),
+			}))
+
 	return n
 
 def node_value(name, value):
 	return Node(name, {'value': '{:6f}'.format(value)})
+def f(value):
+	return '{:6f}'.format(value)
 
 def collect_environment(world):
 
