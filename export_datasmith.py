@@ -956,7 +956,7 @@ def collect_mesh(bl_mesh):
 	m = mesh_copy_triangulated(bl_mesh)
 
 	for idx, mat in enumerate(bl_mesh.materials):
-	    umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
+		umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
 
 	polygons = m.polygons
 	num_polygons = len(polygons)
@@ -1020,7 +1020,7 @@ def color_uchar(data):
 	)
 
 
-def collect_object(bl_obj, dupli_matrix=None, name_override=None):
+def collect_object(bl_obj, dupli_matrix=None, name_override=None, instance_matrix=None):
 
 	uobj = None
 
@@ -1053,6 +1053,8 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 	mat_basis = bl_obj.matrix_world
 	if dupli_matrix:
 		mat_basis = dupli_matrix @ mat_basis
+	if instance_matrix:
+		mat_basis = instance_matrix
 
 	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
@@ -1065,12 +1067,31 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 	uobj.transform.rot = rot
 	uobj.transform.scale = scale
 
-	if bl_obj.instance_type == 'COLLECTION':
-		duplis = bl_obj.instance_collection.objects
-		for idx, dup in enumerate(duplis):
-			dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
-			new_obj = collect_object(dup, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
-			uobj.objects[new_obj.name] = new_obj
+	# TODO: use instanced static meshes
+	if bl_obj.is_instancer:
+		dups = []
+		dup_idx = 0
+		depsgraph = datasmith_context["depsgraph"]
+		for dup in depsgraph.object_instances:
+			if dup.parent and dup.parent.original == bl_obj:
+				dup_name = '%s_%s' % (dup.instance_object.original.name, dup_idx)
+				dup_name = sanitize_name(dup_name)
+				new_obj = collect_object(
+					dup.instance_object.original,
+					instance_matrix=dup.matrix_world.copy(),
+					name_override=dup_name)
+				uobj.objects[dup_name] = new_obj
+				#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
+				dup_idx += 1
+
+
+	# if bl_obj.instance_type == 'COLLECTION':
+	# 	duplis = bl_obj.instance_collection.objects
+	# 	for idx, dup in enumerate(duplis):
+	# 		dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
+	# 		new_obj = collect_object(dup, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
+	# 		uobj.objects[new_obj.name] = new_obj
+
 
 	if dupli_matrix is None: # this was for blender 2.7, maybe 2.8 works without this
 		for child in bl_obj.children:
@@ -1268,11 +1289,13 @@ def collect_and_save(context, args, save_path):
 		"material_curves": [],
 	}
 
+	log.info("collecting objects")
+	datasmith_context['depsgraph'] = context.evaluated_depsgraph_get()
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
 
 	objects = []
-	log.info("collecting objects")
+
 	for obj in root_objects:
 		uobj = collect_object(obj)
 		objects.append(uobj)
