@@ -1,13 +1,11 @@
 # Copyright Andrés Botero 2019
 
 import struct
-from xml.etree import ElementTree
 import os
 from os import path
 import itertools
 import bpy
-from functools import reduce
-
+import numpy as np
 import logging
 log = logging.getLogger("bl_datasmith")
 
@@ -30,7 +28,6 @@ def flatten(it):
 			data += [*d]
 	return data
 
-import numpy as np
 def write_array_data(io, data_struct, data):
 	# first get data length
 	length = len(data)
@@ -48,23 +45,10 @@ def write_array_data(io, data_struct, data):
 		io.write(output)
 	return output
 
-def read_data(io, data_struct):
-	struct_size = struct.calcsize(data_struct)
-	data_struct = "<" + data_struct	# force little endianness
-	data = io.read(struct_size)
-	unpacked_data = struct.unpack(data_struct, data)
-	return unpacked_data
-
 def write_data(io, data_struct, *args):
 	data_struct = '<' + data_struct
 	packed = struct.pack(data_struct, *args)
 	io.write(packed)
-
-def read_string(io):
-	count = struct.unpack("<I", io.read(4))[0]
-	data = io.read(count)
-	return data.decode('utf-8').strip('\0')
-
 
 def write_null(io, num_bytes):
 	io.write(b'\0' * num_bytes)
@@ -81,9 +65,6 @@ def sanitize_name(name):
 
 def f(x):
 	return '{:6f}'.format(x)
-
-# i am introducing this as I want to change some of how the API works
-
 
 class Node:
 	prefix = ""
@@ -132,13 +113,10 @@ class Node:
 		self.children.append(value)
 		return size
 
-
 def node_value(name, value):
 	return Node(name, {'value': f(value)})
 
-
 class UDMesh():
-	node_group = 'meshes'
 
 	def __init__(self, name):
 		self.name = name
@@ -273,7 +251,6 @@ class UDMesh():
 
 
 class UDTexture():
-	node_group = 'textures'
 
 	TEXTURE_MODE_DIFFUSE = "0"
 	TEXTURE_MODE_SPECULAR = "1"
@@ -301,8 +278,6 @@ class UDTexture():
 		elif self.image.file_format == 'OPEN_EXR':
 			ext = ".exr"
 		return safe_name + ext
-
-
 
 	def node(self, folder_name, use_experimental_texture_mode=False):
 		n = Node('Texture')
@@ -347,7 +322,6 @@ class UDTexture():
 
 class UDActor():
 
-
 	class Transform():
 		def __init__(self, tx=0, ty=0, tz=0,
 					 qw=0, qx=0, qy=0, qz=0,
@@ -369,7 +343,6 @@ class UDActor():
 			n['sy'] = f(self.scale.y)
 			n['sz'] = f(self.scale.z)
 			return n
-
 
 	def __init__(self, *, node=None, name=None, layer='Default'):
 		self.transform = UDActor.Transform()
@@ -410,7 +383,6 @@ class UDActor():
 
 class UDActorMesh(UDActor):
 
-
 	def __init__(self, *, name=None):
 		self.mesh = None
 		self.materials = {}
@@ -429,12 +401,10 @@ class UDActorMesh(UDActor):
 
 class UDActorLight(UDActor):
 
-
 	LIGHT_POINT = 'PointLight'
 	LIGHT_SPOT = 'SpotLight'
 	LIGHT_SUN = 'DirectionalLight'
 	LIGHT_AREA = 'AreaLight'
-
 
 	# By default, all lights use unitless
 	# Area lights use lumens
@@ -487,7 +457,6 @@ class UDActorLight(UDActor):
 
 class UDActorCamera(UDActor):
 
-
 	def __init__(self, *, node=None, name=None):
 		super().__init__(node=node, name=name)
 
@@ -516,24 +485,3 @@ class UDActorCamera(UDActor):
 		n.push(Node('Post'))
 		return n
 
-
-class UDScene():
-
-	current_scene = None
-
-	def __init__(self, source=None):
-		self.name = 'udscene_name'
-
-		self.meshes = {}
-		self.objects = {}
-		self.textures = {}
-
-	def get_field(self, cls, name):
-		group = getattr(self, cls.node_group)
-
-		if name in group:
-			return group[name]
-
-		new_object = cls(name=name)
-		group[name] = new_object
-		return new_object

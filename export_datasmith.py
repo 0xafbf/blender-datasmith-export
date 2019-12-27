@@ -7,7 +7,7 @@ import os
 import time
 from os import path
 from .data_types import (
-	UDScene, UDActor, UDActorMesh,
+	UDActor, UDActorMesh,
 	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix, Vector, Euler
 
@@ -937,7 +937,7 @@ def mesh_copy_triangulated(bl_mesh):
 
 
 
-def collect_mesh(bl_mesh, uscene):
+def collect_mesh(bl_mesh):
 
 	# when using linked libraries, some meshes can have the same name
 	mesh_name = sanitize_name(bl_mesh.name)
@@ -1022,7 +1022,7 @@ def color_uchar(data):
 	)
 
 
-def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=None):
+def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 
 	uobj = None
 
@@ -1039,7 +1039,7 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		bl_mesh = bl_obj.data
 		if len(bl_mesh.polygons) > 0:
 			uobj = UDActorMesh(**kwargs)
-			umesh = collect_mesh(bl_obj.data, uscene)
+			umesh = collect_mesh(bl_obj.data)
 			uobj.mesh = umesh.name
 			for idx, slot in enumerate(bl_obj.material_slots):
 				if slot.link == 'OBJECT':
@@ -1160,12 +1160,12 @@ def collect_object(bl_obj, uscene, context, dupli_matrix=None, name_override=Non
 		duplis = bl_obj.instance_collection.objects
 		for idx, dup in enumerate(duplis):
 			dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
-			new_obj = collect_object(dup, uscene, context=context, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
+			new_obj = collect_object(dup, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
 			uobj.objects[new_obj.name] = new_obj
 
 	if dupli_matrix is None: # this was for blender 2.7, maybe 2.8 works without this
 		for child in bl_obj.children:
-			new_obj = collect_object(child, uscene, context=context)
+			new_obj = collect_object(child)
 			uobj.objects[new_obj.name] = new_obj
 
 	return uobj
@@ -1237,12 +1237,22 @@ def get_file_header():
 
 
 def get_or_create_texture(name):
-	utex = UDScene.current_scene.get_field(UDTexture, name)
-	return utex
+	textures = datasmith_context["textures"]
+	for tex in textures:
+		if name == tex.name:
+			return tex
+	new_tex = UDTexture(name)
+	textures.append(new_tex)
+	return new_tex
 
 def get_or_create_mesh(name):
-	umesh = UDScene.current_scene.get_field(UDMesh, name)
-	return umesh
+	meshes = datasmith_context["meshes"]
+	for mesh in meshes:
+		if name == mesh.name:
+			return mesh
+	new_mesh = UDMesh(name)
+	meshes.append(new_mesh)
+	return new_mesh
 
 datasmith_context = None
 def collect_and_save(context, args, save_path):
@@ -1261,12 +1271,11 @@ def collect_and_save(context, args, save_path):
 	all_objects = context.scene.objects
 	root_objects = [obj for obj in all_objects if obj.parent is None]
 
-	uscene = UDScene()
-	UDScene.current_scene = uscene # FIXME
+	objects = []
 	log.info("collecting objects")
 	for obj in root_objects:
-		uobj = collect_object(obj, uscene, context=context)
-		uscene.objects[uobj.name] = uobj
+		uobj = collect_object(obj)
+		objects.append(uobj)
 
 	log.info("collecting materials")
 	materials = datasmith_context["materials"]
@@ -1311,17 +1320,17 @@ def collect_and_save(context, args, save_path):
 		pass
 
 	log.info("writing meshes")
-	for _name, mesh in uscene.meshes.items():
+	for mesh in datasmith_context["meshes"]:
 		mesh.save(basedir, folder_name)
 
 	log.info("writing textures")
-	for _name, tex in uscene.textures.items():
+	for tex in datasmith_context["textures"]:
 		tex.save(basedir, folder_name)
 
 	log.info("building XML tree")
 
 	n = get_file_header()
-	for name, obj in uscene.objects.items():
+	for obj in objects:
 		n.push(obj.node())
 
 	environment = collect_environment(context.scene.world)
@@ -1329,14 +1338,14 @@ def collect_and_save(context, args, save_path):
 		for env in environment:
 			n.push(env)
 
-	for name, mesh in uscene.meshes.items():
+	for mesh in datasmith_context["meshes"]:
 		n.push(mesh.node())
 	for mat in material_nodes:
 		n.push(mat)
 
 	use_experimental_tex_mode = args["experimental_tex_mode"]
 	print("Using experimental tex mode:%s", use_experimental_tex_mode)
-	for name, tex in uscene.textures.items():
+	for tex in datasmith_context["textures"]:
 		n.push(tex.node(folder_name, use_experimental_tex_mode))
 
 	end_time = time.monotonic()
@@ -1353,7 +1362,6 @@ def collect_and_save(context, args, save_path):
 	log.info("export successful")
 
 
-	UDScene.current_scene = None # FIXME
 
 def save(context,*, filepath, **kwargs):
 
