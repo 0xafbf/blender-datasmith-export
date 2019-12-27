@@ -1177,6 +1177,8 @@ def collect_environment(world):
 	nodes = world.node_tree
 	output = nodes.get_output_node('EEVEE') or nodes.get_output_node('ALL') or nodes.get_output_node('CYCLES')
 	background_node = output.inputs['Surface'].links[0].from_node
+	if not 'Color' in background_node.inputs:
+		return
 	if not background_node.inputs['Color'].links:
 		return
 	source_node = background_node.inputs['Color'].links[0].from_node
