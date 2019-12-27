@@ -1020,7 +1020,7 @@ def color_uchar(data):
 	)
 
 
-def collect_object(bl_obj, dupli_matrix=None, name_override=None, instance_matrix=None):
+def collect_object(bl_obj, name_override=None, instance_matrix=None):
 
 	uobj = None
 
@@ -1051,8 +1051,7 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None, instance_matri
 		uobj = UDActor(obj_name)
 
 	mat_basis = bl_obj.matrix_world
-	if dupli_matrix:
-		mat_basis = dupli_matrix @ mat_basis
+
 	if instance_matrix:
 		mat_basis = instance_matrix
 
@@ -1084,19 +1083,9 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None, instance_matri
 				#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 				dup_idx += 1
 
-
-	# if bl_obj.instance_type == 'COLLECTION':
-	# 	duplis = bl_obj.instance_collection.objects
-	# 	for idx, dup in enumerate(duplis):
-	# 		dupli_name = '{parent}_{dup_idx}'.format(parent=dup.name, dup_idx=idx)
-	# 		new_obj = collect_object(dup, dupli_matrix=bl_obj.matrix_world, name_override=dupli_name)
-	# 		uobj.objects[new_obj.name] = new_obj
-
-
-	if dupli_matrix is None: # this was for blender 2.7, maybe 2.8 works without this
-		for child in bl_obj.children:
-			new_obj = collect_object(child)
-			uobj.objects[new_obj.name] = new_obj
+	for child in bl_obj.children:
+		new_obj = collect_object(child)
+		uobj.objects[new_obj.name] = new_obj
 
 	n = uobj.node()
 
