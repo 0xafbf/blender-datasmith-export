@@ -1032,14 +1032,14 @@ def node_transform(mat):
 	n['sz'] = f(scale.z)
 	return n
 
-def collect_object(bl_obj, name_override=None, instance_matrix=None):
+def collect_object(bl_obj, name_override=None, instance_matrix=None, selected_only=False):
 
 	n = Node('Actor')
 
 	n['name'] = bl_obj.name
 	if name_override:
 		n['name'] = name_override
-
+	log.debug("reading object:%s" % bl_obj.name)
 	n['layer'] = "Default"
 
 	mat_basis = bl_obj.matrix_world
@@ -1055,132 +1055,160 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None):
 	transform = node_transform(obj_mat)
 	n.push(transform)
 
-	uobj_objects = {}
-	# TODO: use instanced static meshes
-	if bl_obj.is_instancer:
-		dups = []
-		dup_idx = 0
-		depsgraph = datasmith_context["depsgraph"]
-		for dup in depsgraph.object_instances:
-			if dup.parent and dup.parent.original == bl_obj:
-				dup_name = '%s_%s' % (dup.instance_object.original.name, dup_idx)
-				dup_name = sanitize_name(dup_name)
-				new_obj = collect_object(
-					dup.instance_object.original,
-					instance_matrix=dup.matrix_world.copy(),
-					name_override=dup_name)
-				uobj_objects[dup_name] = new_obj
-				#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
-				dup_idx += 1
+	child_nodes = []
 
 	for child in bl_obj.children:
-		new_obj = collect_object(child)
-		uobj_objects[new_obj.name] = new_obj
+		new_obj = collect_object(child, selected_only=selected_only)
+		if new_obj:
+			child_nodes.append(new_obj)
 
-	if len(uobj_objects) > 0:
+	# if we are exporting only selected items, we should only continue
+	# if this is selected, or if there is any child that needs this
+	# object to be placed in hierarchy
+	# TODO: collections don't work this way, investigate (export chair from classroom)
+	write_all_data = True
+	if selected_only:
+		# by default write minimal data unless selected
+		write_all_data = False
+		if bl_obj in bpy.context.selected_objects:
+			write_all_data = True
+		elif not child_nodes:
+			# if we don't have children, just skip
+			return None
+
+	if write_all_data:
+		# TODO: use instanced static meshes
+		if bl_obj.is_instancer:
+			dups = []
+			dup_idx = 0
+			depsgraph = datasmith_context["depsgraph"]
+			for dup in depsgraph.object_instances:
+				if dup.parent and dup.parent.original == bl_obj:
+					dup_name = '%s_%s' % (dup.instance_object.original.name, dup_idx)
+					dup_name = sanitize_name(dup_name)
+					new_obj = collect_object(
+						dup.instance_object.original,
+						instance_matrix=dup.matrix_world.copy(),
+						name_override=dup_name,
+						selected_only=selected_only)
+					child_nodes.append(new_obj)
+					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
+					dup_idx += 1
+
+
+
+
+		if bl_obj.type == 'EMPTY':
+			pass
+		elif bl_obj.type == 'MESH':
+			bl_mesh = bl_obj.data
+			if len(bl_mesh.polygons) > 0:
+				n.name = 'ActorMesh'
+				material_list = datasmith_context["materials"]
+				for slot in bl_obj.material_slots:
+					material_list.append(slot.material)
+
+				umesh = collect_mesh(bl_mesh)
+				n.push(Node('mesh', {'name': umesh.name}))
+
+				for idx, slot in enumerate(bl_obj.material_slots):
+					if slot.link == 'OBJECT':
+						#collect_materials([slot.material], uscene)
+						safe_name = sanitize_name(slot.material.name)
+						n.push(Node('material', {'id':idx, 'name':safe_name}))
+
+		elif bl_obj.type == 'CAMERA':
+			n.name = 'Camera'
+			bl_cam = bl_obj.data
+
+			# TODO
+			# look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
+
+			use_dof = "1" if bl_cam.dof.use_dof else "0"
+			n.push(Node("DepthOfField", {"enabled": use_dof}))
+			n.push(node_value('SensorWidth', bl_cam.sensor_width))
+			# blender doesn't have per-camera aspect ratio
+			sensor_aspect_ratio = 1.777778
+			n.push(node_value('SensorAspectRatio', sensor_aspect_ratio))
+			n.push(node_value('FocusDistance', bl_cam.dof.focus_distance * 100)) # to centimeters
+			n.push(node_value('FStop', bl_cam.dof.aperture_fstop))
+			n.push(node_value('FocalLength', bl_cam.lens))
+			n.push(Node('Post'))
+
+		elif bl_obj.type == 'LIGHT':
+			bl_light = bl_obj.data
+
+			n.name = 'Light'
+			n['type'] = 'PointLight'
+			n['enabled'] = '1'
+			n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
+			light_intensity = bl_light.energy
+			light_attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
+			light_color = bl_light.color
+			light_intensity_units = 'Lumens' # can also be 'Candelas' or 'Unitless'
+
+			if bl_light.type == 'SUN':
+				n['type'] = 'DirectionalLight'
+				# light_intensity = bl_light.energy # suns are in lux
+
+			elif bl_light.type == 'SPOT':
+				n['type'] = 'SpotLight'
+				outer_cone_angle = bl_light.spot_size * 180 / (2*math.pi)
+				inner_cone_angle = outer_cone_angle * (1 - bl_light.spot_blend)
+				if inner_cone_angle < 0.0001:
+					inner_cone_angle = 0.0001
+				n.push(node_value('InnerConeAngle', inner_cone_angle))
+				n.push(node_value('OuterConeAngle', outer_cone_angle))
+
+				spot_use_candelas = False # TODO: test this thoroughly
+				if spot_use_candelas:
+					light_intensity_units = 'Candelas'
+					light_intensity = bl_light.energy * 0.08 # came up with this constant by brute force
+					# blender watts unit match ue4 lumens unit, but in spot lights the brightness
+					# changes with the spot angle when using lumens while candelas do not.
+
+			elif bl_light.type == 'AREA':
+				n['type'] = 'AreaLight'
+
+				size_w = size_h = bl_light.size
+				if bl_light.shape == 'RECTANGLE' or bl_light.shape == 'ELLIPSE':
+					size_h = bl_light.size_y
+
+				n.push(Node('Shape', {
+					"type": 'None', # can be Rectangle, Disc, Sphere, Cylinder, None
+					"width": size_w * 100, # convert to cm
+					"length": size_h * 100,
+					"LightType": "Rect", # can be "Point", "Spot", "Rect"
+				}))
+
+			if bl_light.use_nodes and bl_light.node_tree:
+
+				node = bl_light.node_tree.nodes['Emission']
+				light_color = node.inputs['Color'].default_value
+				light_intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+				log.error("unsupported: using nodetree for light " + bl_obj.name)
+
+			n.push(node_value('Intensity', light_intensity))
+			n.push(node_value('AttenuationRadius', light_attenuation_radius))
+			n.push(Node('IntensityUnits', {'value': light_intensity_units}))
+			n.push(Node('Color', {
+				'usetemp': '0',
+				'temperature': '6500.0',
+				'R': f(light_color[0]),
+				'G': f(light_color[1]),
+				'B': f(light_color[2]),
+				}))
+		else:
+			log.error("unrecognized object type: %s" % bl_obj.type)
+
+	# just to make children appear last
+
+	if len(child_nodes) > 0:
 		children_node = Node("children");
-		for name, child in uobj_objects.items():
-			children_node.push(child)
+		for child in child_nodes:
+			if child:
+				children_node.push(child)
 		n.push(children_node)
-
-	if bl_obj.type == 'MESH':
-		bl_mesh = bl_obj.data
-		if len(bl_mesh.polygons) > 0:
-			n.name = 'ActorMesh'
-			material_list = datasmith_context["materials"]
-			for slot in bl_obj.material_slots:
-				material_list.append(slot.material)
-
-			umesh = collect_mesh(bl_mesh)
-			n.push(Node('mesh', {'name': umesh.name}))
-
-			for idx, slot in enumerate(bl_obj.material_slots):
-				if slot.link == 'OBJECT':
-					#collect_materials([slot.material], uscene)
-					safe_name = sanitize_name(slot.material.name)
-					n.push(Node('material', {'id':idx, 'name':safe_name}))
-
-	if bl_obj.type == 'CAMERA':
-		n.name = 'Camera'
-		bl_cam = bl_obj.data
-
-		# TODO
-		# look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
-
-		use_dof = "1" if bl_cam.dof.use_dof else "0"
-		n.push(Node("DepthOfField", {"enabled": use_dof}))
-		n.push(node_value('SensorWidth', bl_cam.sensor_width))
-		# blender doesn't have per-camera aspect ratio
-		sensor_aspect_ratio = 1.777778
-		n.push(node_value('SensorAspectRatio', sensor_aspect_ratio))
-		n.push(node_value('FocusDistance', bl_cam.dof.focus_distance * 100)) # to centimeters
-		n.push(node_value('FStop', bl_cam.dof.aperture_fstop))
-		n.push(node_value('FocalLength', bl_cam.lens))
-		n.push(Node('Post'))
-
-	elif bl_obj.type == 'LIGHT':
-		bl_light = bl_obj.data
-
-		n.name = 'Light'
-		n['type'] = 'PointLight'
-		n['enabled'] = '1'
-		n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
-		light_intensity = bl_light.energy
-		light_attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
-		light_color = bl_light.color
-		light_intensity_units = 'Lumens' # can also be 'Candelas' or 'Unitless'
-
-		if bl_light.type == 'SUN':
-			n['type'] = 'DirectionalLight'
-			# light_intensity = bl_light.energy # suns are in lux
-
-		elif bl_light.type == 'SPOT':
-			n['type'] = 'SpotLight'
-			outer_cone_angle = bl_light.spot_size * 180 / (2*math.pi)
-			inner_cone_angle = outer_cone_angle * (1 - bl_light.spot_blend)
-			if inner_cone_angle < 0.0001:
-				inner_cone_angle = 0.0001
-			n.push(node_value('InnerConeAngle', inner_cone_angle))
-			n.push(node_value('OuterConeAngle', outer_cone_angle))
-
-			spot_use_candelas = False # TODO: test this thoroughly
-			if spot_use_candelas:
-				light_intensity_units = 'Candelas'
-				light_intensity = bl_light.energy * 0.08 # came up with this constant by brute force
-				# blender watts unit match ue4 lumens unit, but in spot lights the brightness
-				# changes with the spot angle when using lumens while candelas do not.
-
-		elif bl_light.type == 'AREA':
-			n['type'] = 'AreaLight'
-
-			size_w = size_h = bl_light.size
-			if bl_light.shape == 'RECTANGLE' or bl_light.shape == 'ELLIPSE':
-				size_h = bl_light.size_y
-
-			n.push(Node('Shape', {
-				"type": 'None', # can be Rectangle, Disc, Sphere, Cylinder, None
-				"width": size_w * 100, # convert to cm
-				"length": size_h * 100,
-				"LightType": "Rect", # can be "Point", "Spot", "Rect"
-			}))
-
-		if bl_light.use_nodes and bl_light.node_tree:
-
-			node = bl_light.node_tree.nodes['Emission']
-			light_color = node.inputs['Color'].default_value
-			light_intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
-			log.error("unsupported: using nodetree for light " + bl_obj.name)
-
-		n.push(node_value('Intensity', light_intensity))
-		n.push(node_value('AttenuationRadius', light_attenuation_radius))
-		n.push(Node('IntensityUnits', {'value': light_intensity_units}))
-		n.push(Node('Color', {
-			'usetemp': '0',
-			'temperature': '6500.0',
-			'R': f(light_color[0]),
-			'G': f(light_color[1]),
-			'B': f(light_color[2]),
-			}))
 
 	return n
 
@@ -1247,7 +1275,7 @@ def get_file_header():
 	n.push(Node('Application', {
 		'Vendor': 'Blender',
 		'ProductName': 'Blender',
-		'ProductVersion': '2.80',
+		'ProductVersion': '2.81',
 		}))
 
 	n.push(Node('User', {
@@ -1296,9 +1324,11 @@ def collect_and_save(context, args, save_path):
 
 	objects = []
 
+	selected_only = args["export_selected"]
 	for obj in root_objects:
-		uobj = collect_object(obj)
-		objects.append(uobj)
+		uobj = collect_object(obj, selected_only=selected_only)
+		if uobj:
+			objects.append(uobj)
 
 	log.info("collecting materials")
 	materials = datasmith_context["materials"]

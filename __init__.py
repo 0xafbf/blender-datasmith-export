@@ -47,6 +47,11 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			description="Enable logging to Window > System console",
 			default=False,
 			)
+	export_selected: BoolProperty(
+			name="Export selected objects",
+			description="Exports only the selected objects",
+			default=False,
+			)
 	experimental_tex_mode: BoolProperty(
 			name="Use experimental texture mode mask",
 			description="Exports non-color textures in an unofficial mode to "
