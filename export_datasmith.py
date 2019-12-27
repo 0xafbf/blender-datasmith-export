@@ -933,10 +933,10 @@ def mesh_copy_triangulated(bl_mesh):
 
 
 
-def collect_mesh(bl_mesh):
+def collect_mesh(bl_mesh, mesh_name):
 
 	# when using linked libraries, some meshes can have the same name
-	mesh_name = sanitize_name(bl_mesh.name)
+	mesh_name = sanitize_name(mesh_name)
 	if bl_mesh.library:
 		#import pdb; pdb.set_trace()
 		lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
@@ -1032,7 +1032,12 @@ def node_transform(mat):
 	n['sz'] = f(scale.z)
 	return n
 
-def collect_object(bl_obj, name_override=None, instance_matrix=None, selected_only=False):
+def collect_object(bl_obj,
+	name_override=None,
+	instance_matrix=None,
+	selected_only=False,
+	apply_modifiers=False
+	):
 
 	n = Node('Actor')
 
@@ -1058,7 +1063,7 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None, selected_on
 	child_nodes = []
 
 	for child in bl_obj.children:
-		new_obj = collect_object(child, selected_only=selected_only)
+		new_obj = collect_object(child, selected_only=selected_only, apply_modifiers=apply_modifiers)
 		if new_obj:
 			child_nodes.append(new_obj)
 
@@ -1078,10 +1083,12 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None, selected_on
 
 	if write_all_data:
 		# TODO: use instanced static meshes
+
+		depsgraph = datasmith_context["depsgraph"]
+
 		if bl_obj.is_instancer:
 			dups = []
 			dup_idx = 0
-			depsgraph = datasmith_context["depsgraph"]
 			for dup in depsgraph.object_instances:
 				if dup.parent and dup.parent.original == bl_obj:
 					dup_name = '%s_%s' % (dup.instance_object.original.name, dup_idx)
@@ -1090,25 +1097,31 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None, selected_on
 						dup.instance_object.original,
 						instance_matrix=dup.matrix_world.copy(),
 						name_override=dup_name,
-						selected_only=selected_only)
+						selected_only=False, # if is instancer, maybe all child want to be instanced
+						apply_modifiers=False, # if is instancer, applying modifiers may end in a lot of meshes
+						)
 					child_nodes.append(new_obj)
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
-
-
 
 
 		if bl_obj.type == 'EMPTY':
 			pass
 		elif bl_obj.type == 'MESH':
 			bl_mesh = bl_obj.data
+			bl_mesh_name = bl_mesh.name
+
+			if bl_obj.modifiers and apply_modifiers:
+				bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
+				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
+
 			if len(bl_mesh.polygons) > 0:
 				n.name = 'ActorMesh'
 				material_list = datasmith_context["materials"]
 				for slot in bl_obj.material_slots:
 					material_list.append(slot.material)
 
-				umesh = collect_mesh(bl_mesh)
+				umesh = collect_mesh(bl_mesh, bl_mesh_name)
 				n.push(Node('mesh', {'name': umesh.name}))
 
 				for idx, slot in enumerate(bl_obj.material_slots):
@@ -1325,8 +1338,9 @@ def collect_and_save(context, args, save_path):
 	objects = []
 
 	selected_only = args["export_selected"]
+	apply_modifiers = args["apply_modifiers"]
 	for obj in root_objects:
-		uobj = collect_object(obj, selected_only=selected_only)
+		uobj = collect_object(obj, selected_only=selected_only, apply_modifiers=apply_modifiers)
 		if uobj:
 			objects.append(uobj)
 
