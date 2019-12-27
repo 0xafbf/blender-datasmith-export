@@ -8,7 +8,7 @@ import time
 from os import path
 from .data_types import (
 	UDActor, UDActorMesh,
-	UDActorLight, UDActorCamera, UDMesh, Node, UDTexture, sanitize_name)
+	UDActorLight, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -1049,23 +1049,6 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 		else: # if is a mesh with no polys, treat as empty
 			uobj = UDActor(**kwargs)
 
-	elif bl_obj.type == 'CAMERA':
-		uobj = UDActorCamera(**kwargs)
-		bl_cam = bl_obj.data
-		uobj.sensor_width = bl_cam.sensor_width
-		# blender does not have aspect ratio for cameras
-		# uobj.sensor_aspect_ratio = 1.777778
-		uobj.enable_dof = bl_cam.dof.use_dof
-		if uobj.enable_dof:
-			uobj.focus_distance = bl_cam.dof.focus_distance * 100 # to centimeters
-			if bl_cam.dof.focus_object:
-				# TODO test this, I don't know if this look_at_actor
-				# is for focus or for rotating the camera.
-				uobj.look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
-			uobj.f_stop = bl_cam.dof.aperture_fstop
-
-		uobj.focal_length = bl_cam.lens
-
 	elif bl_obj.type == 'LIGHT':
 		uobj = UDActorLight(**kwargs)
 		bl_light = bl_obj.data
@@ -1088,7 +1071,6 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 				# changes with the spot angle when using lumens while candelas do not.
 				# TODO: put this behind a flag, and maybe docs
 
-
 		# this seems to give a good result
 		uobj.attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
 
@@ -1104,16 +1086,12 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 				or bl_light.shape == 'ELLIPSE'):
 				size_h = bl_light.size_y
 
-
-
 			# light_shape fills the light with geometry, so better set none instead
 			light_shape = 'None'
 			# light_shape = 'Rectangle'
 			# if (bl_light.shape == 'DISK'
 			# 	or bl_light.shape == 'ELLIPSE'):
 			# 	light_shape = 'Disc'
-
-
 
 			uobj.shape = Node('Shape', {
 				"type": light_shape, # can be Rectangle, Disc, Sphere, Cylinder, None
@@ -1168,7 +1146,30 @@ def collect_object(bl_obj, dupli_matrix=None, name_override=None):
 			new_obj = collect_object(child)
 			uobj.objects[new_obj.name] = new_obj
 
-	return uobj
+	n = uobj.node()
+
+	if bl_obj.type == 'CAMERA':
+		n.name = 'Camera'
+		bl_cam = bl_obj.data
+
+		# TODO
+		# look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
+
+		use_dof = "1" if bl_cam.dof.use_dof else "0"
+		n.push(Node("DepthOfField", {"enabled": use_dof}))
+		n.push(node_value('SensorWidth', bl_cam.sensor_width))
+		# blender doesn't have per-camera aspect ratio
+		sensor_aspect_ratio = 1.777778
+		n.push(node_value('SensorAspectRatio', sensor_aspect_ratio))
+		n.push(node_value('FocusDistance', bl_cam.dof.focus_distance * 100)) # to centimeters
+		n.push(node_value('FStop', bl_cam.dof.aperture_fstop))
+		n.push(node_value('FocalLength', bl_cam.lens))
+		n.push(Node('Post'))
+
+	return n
+
+def node_value(name, value):
+	return Node(name, {'value': '{:6f}'.format(value)})
 
 def collect_environment(world):
 
@@ -1331,7 +1332,7 @@ def collect_and_save(context, args, save_path):
 
 	n = get_file_header()
 	for obj in objects:
-		n.push(obj.node())
+		n.push(obj)
 
 	environment = collect_environment(context.scene.world)
 	if environment:

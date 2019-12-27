@@ -344,28 +344,12 @@ class UDActor():
 			n['sz'] = f(self.scale.z)
 			return n
 
-	def __init__(self, *, node=None, name=None, layer='Default'):
+	def __init__(self, name=None, layer='Default'):
 		self.transform = UDActor.Transform()
 		self.objects = {}
 		self.materials = {}
 		self.name = name
 		self.layer = layer
-		if node: # for import
-			self.name = node.attrib['name']
-			self.layer = node.attrib['layer']
-			node_transform = node.find('Transform')
-			if node_transform is not None:
-				self.transform = UDActor.Transform(**node_transform.attrib)
-			else:
-				import pdb; pdb.set_trace()
-			node_children = node.find('children')
-			if node_children is not None:
-				for child in node_children:
-					name = child.attrib["name"]
-					if child.tag == "Actor":
-						UDActor(name=name, node=child)
-					if child.tag == "ActorMesh":
-						UDActorMesh(name=name, node=child)
 
 	def node(self):
 		n = Node('Actor')
@@ -413,8 +397,8 @@ class UDActorLight(UDActor):
 	LIGHT_UNIT_LUMENS = 'Lumens'
 	LIGHT_UNIT_UNITLESS = 'Unitless'
 
-	def __init__(self, *, node=None, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
-		super().__init__(node=node, name=name)
+	def __init__(self, name=None, light_type = LIGHT_POINT, color = (1.0,1.0,1.0)):
+		super().__init__(name=name)
 		self.type = light_type
 		self.intensity = 1000
 		self.attenuation_radius = 1000
@@ -425,8 +409,6 @@ class UDActorLight(UDActor):
 		self.shape = None
 		self.node_props = []
 		self.post = []
-		if node:
-			self.parse(node)
 
 	def node(self):
 		n = super().node()
@@ -453,35 +435,5 @@ class UDActorLight(UDActor):
 			n.push(self.shape)
 		for prop in self.node_props:
 			n.push(prop)
-		return n
-
-class UDActorCamera(UDActor):
-
-	def __init__(self, *, node=None, name=None):
-		super().__init__(node=node, name=name)
-
-		self.sensor_width = 36.0
-		self.sensor_aspect_ratio = 1.777778
-		self.enable_dof = False
-		self.focus_distance = 1000.0
-		self.f_stop = 2.8
-		self.focal_length = 50.0
-		self.look_at_actor = None
-		self.post = []
-		if node:
-			self.parse(node)
-
-	def node(self):
-		n = super().node()
-		n.name = 'Camera'
-		val = node_value
-		use_dof = "1" if self.enable_dof else "0"
-		n.push(Node("DepthOfField", {"enabled": use_dof}))
-		n.push(val('SensorWidth', self.sensor_width))
-		n.push(val('SensorAspectRatio', self.sensor_aspect_ratio))
-		n.push(val('FocusDistance', self.focus_distance))
-		n.push(val('FStop', self.f_stop))
-		n.push(val('FocalLength', self.focal_length))
-		n.push(Node('Post'))
 		return n
 
