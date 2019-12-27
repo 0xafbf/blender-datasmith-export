@@ -7,8 +7,7 @@ import os
 import time
 from os import path
 from .data_types import (
-	UDActor, UDActorMesh,
-	UDMesh, Node, UDTexture, sanitize_name)
+	UDActor, UDMesh, Node, UDTexture, sanitize_name)
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -1019,36 +1018,17 @@ def color_uchar(data):
 		int(data[3]*255),
 	)
 
-
 def collect_object(bl_obj, name_override=None, instance_matrix=None):
 
 	uobj = None
 
-	kwargs = {}
 	obj_name = bl_obj.name
 	if name_override:
 		obj_name = name_override
 
-	if bl_obj.type == 'MESH':
-		material_list = datasmith_context["materials"]
-		for slot in bl_obj.material_slots:
-			material_list.append(slot.material)
-
-		bl_mesh = bl_obj.data
-		if len(bl_mesh.polygons) > 0:
-			uobj = UDActorMesh(obj_name)
-			umesh = collect_mesh(bl_obj.data)
-			uobj.mesh = umesh.name
-			for idx, slot in enumerate(bl_obj.material_slots):
-				if slot.link == 'OBJECT':
-					#collect_materials([slot.material], uscene)
-					uobj.materials[idx] = sanitize_name(slot.material.name)
-
-		else: # if is a mesh with no polys, treat as empty
-			uobj = UDActor(obj_name)
-
-	else: # maybe empties
-		uobj = UDActor(obj_name)
+	umesh = None
+	umaterials = {}
+	uobj = UDActor(obj_name)
 
 	mat_basis = bl_obj.matrix_world
 
@@ -1088,6 +1068,26 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None):
 		uobj.objects[new_obj.name] = new_obj
 
 	n = uobj.node()
+
+	if bl_obj.type == 'MESH':
+		bl_mesh = bl_obj.data
+		if len(bl_mesh.polygons) > 0:
+			n.name = 'ActorMesh'
+			material_list = datasmith_context["materials"]
+			for slot in bl_obj.material_slots:
+				material_list.append(slot.material)
+
+			umesh = collect_mesh(bl_mesh)
+			for idx, slot in enumerate(bl_obj.material_slots):
+				if slot.link == 'OBJECT':
+					#collect_materials([slot.material], uscene)
+					umaterials[idx] = sanitize_name(slot.material.name)
+
+			n.push(Node('mesh', {'name': umesh.name}))
+
+			for idx, m in umaterials.items():
+				n.push(Node('material', {'id':idx, 'name':m}))
+
 
 	if bl_obj.type == 'CAMERA':
 		n.name = 'Camera'

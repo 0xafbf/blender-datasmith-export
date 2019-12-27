@@ -363,21 +363,3 @@ class UDActor():
 				children_node.push(child)
 			n.push(children_node)
 		return n
-
-
-class UDActorMesh(UDActor):
-
-	def __init__(self, name=None):
-		self.mesh = None
-		self.materials = {}
-		super().__init__(name=name)
-
-	def node(self):
-		n = super().node()
-		n.name = 'ActorMesh'
-		n.push(Node('mesh', {'name': self.mesh}))
-
-		for idx, m in self.materials.items():
-			n.push(Node('material', {'id':idx, 'name':m}))
-
-		return n
