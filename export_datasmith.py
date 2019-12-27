@@ -6,8 +6,7 @@ import math
 import os
 import time
 from os import path
-from .data_types import (
-	UDActor, UDMesh, Node, UDTexture, sanitize_name)
+from .data_types import UDMesh, Node, UDTexture, sanitize_name
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -1018,20 +1017,32 @@ def color_uchar(data):
 		int(data[3]*255),
 	)
 
+def node_transform(mat):
+	loc, rot, scale = mat.decompose()
+	n = Node('Transform')
+	n['tx'] = f(loc.x)
+	n['ty'] = f(loc.y)
+	n['tz'] = f(loc.z)
+	n['qw'] = f(rot.w)
+	n['qx'] = f(rot.x)
+	n['qy'] = f(rot.y)
+	n['qz'] = f(rot.z)
+	n['sx'] = f(scale.x)
+	n['sy'] = f(scale.y)
+	n['sz'] = f(scale.z)
+	return n
+
 def collect_object(bl_obj, name_override=None, instance_matrix=None):
 
-	uobj = None
+	n = Node('Actor')
 
-	obj_name = bl_obj.name
+	n['name'] = bl_obj.name
 	if name_override:
-		obj_name = name_override
+		n['name'] = name_override
 
-	umesh = None
-	umaterials = {}
-	uobj = UDActor(obj_name)
+	n['layer'] = "Default"
 
 	mat_basis = bl_obj.matrix_world
-
 	if instance_matrix:
 		mat_basis = instance_matrix
 
@@ -1041,11 +1052,10 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None):
 		# use this correction because lights/cameras in blender point -Z
 		obj_mat = obj_mat @ matrix_forward
 
-	loc, rot, scale = obj_mat.decompose()
-	uobj.transform.loc = loc
-	uobj.transform.rot = rot
-	uobj.transform.scale = scale
+	transform = node_transform(obj_mat)
+	n.push(transform)
 
+	uobj_objects = {}
 	# TODO: use instanced static meshes
 	if bl_obj.is_instancer:
 		dups = []
@@ -1059,15 +1069,19 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None):
 					dup.instance_object.original,
 					instance_matrix=dup.matrix_world.copy(),
 					name_override=dup_name)
-				uobj.objects[dup_name] = new_obj
+				uobj_objects[dup_name] = new_obj
 				#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 				dup_idx += 1
 
 	for child in bl_obj.children:
 		new_obj = collect_object(child)
-		uobj.objects[new_obj.name] = new_obj
+		uobj_objects[new_obj.name] = new_obj
 
-	n = uobj.node()
+	if len(uobj_objects) > 0:
+		children_node = Node("children");
+		for name, child in uobj_objects.items():
+			children_node.push(child)
+		n.push(children_node)
 
 	if bl_obj.type == 'MESH':
 		bl_mesh = bl_obj.data
@@ -1078,16 +1092,13 @@ def collect_object(bl_obj, name_override=None, instance_matrix=None):
 				material_list.append(slot.material)
 
 			umesh = collect_mesh(bl_mesh)
+			n.push(Node('mesh', {'name': umesh.name}))
+
 			for idx, slot in enumerate(bl_obj.material_slots):
 				if slot.link == 'OBJECT':
 					#collect_materials([slot.material], uscene)
-					umaterials[idx] = sanitize_name(slot.material.name)
-
-			n.push(Node('mesh', {'name': umesh.name}))
-
-			for idx, m in umaterials.items():
-				n.push(Node('material', {'id':idx, 'name':m}))
-
+					safe_name = sanitize_name(slot.material.name)
+					n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 	if bl_obj.type == 'CAMERA':
 		n.name = 'Camera'
@@ -1310,13 +1321,15 @@ def collect_and_save(context, args, save_path):
 	curve_list = datasmith_context["material_curves"]
 	log.info("curves: "+str(len(curve_list)))
 	for idx, curve in enumerate(curve_list):
+		log.debug("processing curve:%s", idx)
 		row_idx = (255-idx) * 256
 		for i in range(256):
 			pixel_idx = (row_idx + i) * 4
-			pixels[pixel_idx] = curve[i][0]
-			pixels[pixel_idx+1] = curve[i][1]
-			pixels[pixel_idx+2] = curve[i][2]
-			pixels[pixel_idx+3] = curve[i][3]
+			curve_i = curve[i]
+			pixels[pixel_idx] = curve_i[0]
+			pixels[pixel_idx+1] = curve_i[1]
+			pixels[pixel_idx+2] = curve_i[2]
+			pixels[pixel_idx+3] = curve_i[3]
 
 	texture = get_or_create_texture("datasmith_curves")
 	texture.image = curves_image
