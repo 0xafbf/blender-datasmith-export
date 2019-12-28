@@ -295,6 +295,8 @@ class UDTexture():
 			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
 			if use_experimental_texture_mode:
 				self.texture_mode = UDTexture.TEXTURE_MODE_MASK
+			else:
+				n['rgbcurve'] = "0.454545"
 		else:
 			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
 
