@@ -31,6 +31,7 @@ This result is in a custom UE4 build, which fixes some issues of the UE4
 importer. If you are technical to compile the engine, you can check the fork
 [here][ue4 fork]. Hopefully we can get to integrate our fixes into the main
 branch.
+
 [ue4 fork]: https://github.com/0xafbf/UnrealEngine/tree/master
 
 Now [__Download the latest version__][download_link] and install from the
@@ -38,8 +39,7 @@ Blender addons preferences pane.
 
 [download_link]: https://github.com/0xafbf/blender-datasmith-export/releases/download/v0.1.1/blender_datasmith_export.zip
 
-If you want to support the project, also consider supporting via [Patreon],
-even if it is a little it adds up.
+If you want to support the project, also consider supporting via [Patreon].
 
 [patreon]: https://www.patreon.com/0xafbf
 
