@@ -25,7 +25,9 @@ __UE4 using Datasmith:__
 
 This result relies on the **DatasmithBlenderContent**, which is a UE4 Plugin
 that improves material import compatibility. Consider supporting the project by
-purchasing it from the Epic Store or Gumroad (more info coming soon)
+purchasing it from [here][gumroad] (Epic Games store support will be added later)
+
+[gumroad]: https://gum.co/DQvTL
 
 This result is in a custom UE4 build, which fixes some issues of the UE4
 importer. If you are technical to compile the engine, you can check the fork
