@@ -36,7 +36,7 @@ branch.
 Now [__Download the latest version__][download_link] and install from the
 Blender addons preferences pane.
 
-[download_link]: https://github.com/0xafbf/blender-datasmith-export/archive/master.zip
+[download_link]: https://github.com/0xafbf/blender-datasmith-export/releases/download/v0.1.1/blender_datasmith_export.zip
 
 If you want to support the project, also consider supporting via [Patreon],
 even if it is a little it adds up.
