@@ -190,8 +190,6 @@ def exp_blend(exp_0, exp_1, blend_type, exp_list):
 	n.push(Node("1", exp_1))
 	return {"expression": exp_list.push(n)}
 
-
-
 def exp_mixrgb(node, exp_list):
 	exp_1 = get_expression(node.inputs['Color1'], exp_list)
 	exp_2 = get_expression(node.inputs['Color2'], exp_list)
@@ -207,15 +205,14 @@ def exp_mixrgb(node, exp_list):
 	return exp_list.push(lerp)
 
 op_custom_functions = {
-	"HUE_SAT":   "/BlenderDatasmithAdditions/MaterialFunctions/AdjustHSV",
-	"MAPPING_TEX2D": "/BlenderDatasmithAdditions/MaterialFunctions/MappingTexture2D",
-	"MAPPING_POINT2D": "/BlenderDatasmithAdditions/MaterialFunctions/MappingPoint2D",
-	"LAYER_WEIGHT": "/BlenderDatasmithAdditions/MaterialFunctions/LayerWeight",
-	"CURVE_RGB": "/BlenderDatasmithAdditions/MaterialFunctions/RGBCurveLookup",
+	"CURVE_RGB":          "/DatasmithBlenderContent/MaterialFunctions/RGBCurveLookup",
+	"FRESNEL":            "/DatasmithBlenderContent/MaterialFunctions/BlenderFresnel",
+	"HUE_SAT":            "/DatasmithBlenderContent/MaterialFunctions/AdjustHSV",
+	"LAYER_WEIGHT":       "/DatasmithBlenderContent/MaterialFunctions/LayerWeight",
+	"MAPPING_POINT2D":    "/DatasmithBlenderContent/MaterialFunctions/MappingPoint2D",
+	"MAPPING_TEX2D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture2D",
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
-	"FRESNEL": "/BlenderDatasmithAdditions/MaterialFunctions/BlenderFresnel",
 }
-
 
 # TODO: this depends on having the material functions in UE4
 def exp_hsv(node, exp_list):
