@@ -171,10 +171,10 @@ op_map_color = {
 	'DIFFERENCE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Difference",
 # SUBTRACT is handled in op_map
 # DIVIDE is handled in op_map
-# HUE is unhandled TODO
-# SATURATION is unhandled
-# COLOR is unhandled
-# VALUE is unhandled
+	'HUE': "/DatasmithBlenderContent/MaterialFunctions/Blend_Hue",
+	'SATURATION': "/DatasmithBlenderContent/MaterialFunctions/Blend_Saturation",
+	'COLOR': "/DatasmithBlenderContent/MaterialFunctions/Blend_Color",
+	'VALUE': "/DatasmithBlenderContent/MaterialFunctions/Blend_Value",
 }
 
 def exp_blend(exp_0, exp_1, blend_type, exp_list):
@@ -1191,12 +1191,13 @@ def collect_object(bl_obj,
 					"LightType": "Rect", # can be "Point", "Spot", "Rect"
 				}))
 
-			if bl_light.use_nodes and bl_light.node_tree:
+			# TODO: check how lights work when using a node tree
+			# if bl_light.use_nodes and bl_light.node_tree:
 
-				node = bl_light.node_tree.nodes['Emission']
-				light_color = node.inputs['Color'].default_value
-				light_intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
-				log.error("unsupported: using nodetree for light " + bl_obj.name)
+			# 	node = bl_light.node_tree.nodes['Emission']
+			# 	light_color = node.inputs['Color'].default_value
+			# 	light_intensity = node.inputs['Strength'].default_value # have to check how to relate to candelas
+			# 	log.error("unsupported: using nodetree for light " + bl_obj.name)
 
 			n.push(node_value('Intensity', light_intensity))
 			n.push(node_value('AttenuationRadius', light_attenuation_radius))
@@ -1229,9 +1230,9 @@ def f(value):
 
 def collect_environment(world):
 
-	log.info("Collecting environment")
 	if not world.use_nodes:
 		return
+
 	log.info("Collecting environment")
 	nodes = world.node_tree
 	output = nodes.get_output_node('EEVEE') or nodes.get_output_node('ALL') or nodes.get_output_node('CYCLES')
@@ -1244,7 +1245,8 @@ def collect_environment(world):
 	if source_node.type != 'TEX_ENVIRONMENT':
 		log.info("Background texture is "+ source_node.type)
 		return
-	log.info("Collecting environment")
+
+	log.info("found environment, collecting...")
 	image = source_node.image
 
 	tex_name = sanitize_name(image.name)
@@ -1341,6 +1343,8 @@ def collect_and_save(context, args, save_path):
 		if uobj:
 			objects.append(uobj)
 
+	environment = collect_environment(context.scene.world)
+
 	log.info("collecting materials")
 	materials = datasmith_context["materials"]
 	unique_materials = []
@@ -1389,6 +1393,8 @@ def collect_and_save(context, args, save_path):
 	for mesh in datasmith_context["meshes"]:
 		mesh.save(basedir, folder_name)
 
+
+
 	log.info("writing textures")
 	for tex in datasmith_context["textures"]:
 		tex.save(basedir, folder_name)
@@ -1399,7 +1405,6 @@ def collect_and_save(context, args, save_path):
 	for obj in objects:
 		n.push(obj)
 
-	environment = collect_environment(context.scene.world)
 	if environment:
 		for env in environment:
 			n.push(env)
