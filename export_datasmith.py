@@ -1281,18 +1281,28 @@ def collect_environment(world):
 def get_file_header():
 
 	n = Node('DatasmithUnrealScene')
-	n.push(Node('Version', children=['0.22']))
-	n.push(Node('SDKVersion', children=['4.22E0']))
+
+	from . import bl_info
+	plugin_version = bl_info['version']
+	plugin_version_string = "%s.%s.%s" % plugin_version
+	n.push(Node('Version', children=[plugin_version_string]))
+	n.push(Node('SDKVersion', children=['4.24E0']))
 	n.push(Node('Host', children=['Blender']))
+
+	blender_version = bpy.app.version_string
 	n.push(Node('Application', {
-		'Vendor': 'Blender',
+		'Vendor': 'Blender Foundation',
 		'ProductName': 'Blender',
-		'ProductVersion': '2.81',
+		'ProductVersion': blender_version,
 		}))
 
+	import os, platform
+	os_name = "%s %s" % (platform.system(), platform.release())
+	user_name = os.getlogin()
+
 	n.push(Node('User', {
-		'ID': '00000000000000000000000000000000',
-		'OS': 'Windows 8.1',
+		'ID': user_name,
+		'OS': os_name,
 		}))
 	return n
 
@@ -1423,6 +1433,9 @@ def collect_and_save(context, args, save_path):
 	total_time = end_time - start_time
 
 	log.info("preparing data took:%f"%total_time)
+	n.push(
+		Node("Export", {"Duration":total_time})
+	)
 
 	result = n.string_rep(first=True)
 
