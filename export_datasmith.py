@@ -1042,7 +1042,8 @@ def collect_object(bl_obj,
 	if name_override:
 		n['name'] = name_override
 	log.debug("reading object:%s" % bl_obj.name)
-	n['layer'] = "Default"
+
+	n['layer'] = bl_obj.users_collection[0].name_full
 
 	mat_basis = bl_obj.matrix_world
 	if instance_matrix:
