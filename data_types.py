@@ -266,6 +266,7 @@ class UDTexture():
 		self.image = None
 		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
 		self.normal_map_flag = False
+		self.hash = ""
 
 	#this just returns the name without the path
 	def abs_path(self):
@@ -311,13 +312,19 @@ class UDTexture():
 		image_path = path.join(basedir, folder_name, self.abs_path())
 		old_path = self.image.filepath_raw
 		self.image.filepath_raw = image_path
-		self.image.save()
+
+		# fix for invalid images, like one in mr_elephant sample.
+		valid_image = (self.image.channels != 0)
+		if valid_image:
+			self.image.save()
 		if old_path:
 			self.image.filepath_raw = old_path
-		import hashlib
-		hash_md5 = hashlib.md5()
-		with open(image_path, "rb") as f:
-			for chunk in iter(lambda: f.read(4096), b""):
-				hash_md5.update(chunk)
-		self.hash = hash_md5.hexdigest()
+
+		if valid_image:
+			import hashlib
+			hash_md5 = hashlib.md5()
+			with open(image_path, "rb") as f:
+				for chunk in iter(lambda: f.read(4096), b""):
+					hash_md5.update(chunk)
+			self.hash = hash_md5.hexdigest()
 
