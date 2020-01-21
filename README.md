@@ -36,12 +36,12 @@ branch.
 
 [ue4 fork]: https://github.com/0xafbf/UnrealEngine/tree/master
 
-Now [__Download the latest version__][download_link] and install from the
-Blender addons preferences pane.
+Now [__Download the latest development version__][download_link] and install
+from the Blender addons preferences pane.
 
-[download_link]: https://github.com/0xafbf/blender-datasmith-export/releases/download/v0.1.1/blender_datasmith_export.zip
+[download_link]: https://github.com/0xafbf/blender-datasmith-export/archive/master.zip
 
-If you want to support the project, also consider supporting via [Patreon].
+If you want to support the project, consider supporting via [Patreon].
 
 [patreon]: https://www.patreon.com/0xafbf
 
