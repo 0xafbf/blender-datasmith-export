@@ -60,10 +60,8 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			default=False,
 		)
 	experimental_tex_mode: BoolProperty(
-			name="Use experimental texture mode mask",
-			description="Exports non-color textures in an unofficial mode to "
-						"keep non-srgb flag in custom UE4 engine builds, "
-						"check readme for more info",
+			name="Use sRGB support (UE4 4.25)",
+			description="Disables the gamma hack to export masks correctly",
 			default=False,
 		)
 

@@ -259,7 +259,6 @@ class UDTexture():
 	TEXTURE_MODE_DISPLACE = "4"
 	TEXTURE_MODE_OTHER = "5"
 	TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
-	TEXTURE_MODE_MASK = "7" # experimental texture mode to send with sRGB flag off
 
 	def __init__(self, name):
 		self.name = name
@@ -285,7 +284,7 @@ class UDTexture():
 		n['name'] = self.name
 		n['file'] = path.join(folder_name, self.abs_path())
 		n['rgbcurve'] = 0.0
-
+		n['srgb'] = "1" # this parameter is only read on 4.25 onwards
 
 		if self.image.file_format == 'HDR':
 			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
@@ -294,9 +293,9 @@ class UDTexture():
 			self.texture_mode = UDTexture.TEXTURE_MODE_NORMAL_GREEN_INV
 		elif self.image.colorspace_settings.is_data:
 			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
-			if use_experimental_texture_mode:
-				self.texture_mode = UDTexture.TEXTURE_MODE_MASK
-			else:
+			n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
+			if not use_experimental_texture_mode:
+				# use this hack if not using experimental mode
 				n['rgbcurve'] = "0.454545"
 		else:
 			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE

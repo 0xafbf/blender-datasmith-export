@@ -1313,6 +1313,7 @@ def get_or_create_texture(name):
 	for tex in textures:
 		if name == tex.name:
 			return tex
+	log.debug("collecting texture:%s" % name)
 	new_tex = UDTexture(name)
 	textures.append(new_tex)
 	return new_tex
