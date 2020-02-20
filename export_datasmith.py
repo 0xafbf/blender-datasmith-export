@@ -284,6 +284,10 @@ def exp_layer_weight(socket, exp_list):
 	log.error("LAYER_WEIGHT node from unknown socket")
 	return {"expression": expr, "OutputIndex": 0}
 
+def exp_light_path(socket, exp_list):
+	n = exp_scalar(1, exp_list)
+	return {"expression": n}
+
 
 def add_material_curve(curve):
 	curves = datasmith_context["material_curves"]
@@ -457,7 +461,8 @@ def get_expression(field, exp_list):
 	# node inputs, but it does for scalars and colors
 	# TODO: check which cases we should be careful
 	global expression_log_prefix
-	log.debug(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
+	field_path = f"{field.node.name}/{field.name}:{field.type}"
+	log.debug(expression_log_prefix + field_path)
 
 	if not field.links:
 		if field.type == 'VALUE':
@@ -503,13 +508,16 @@ def get_expression(field, exp_list):
 
 	socket = field.links[0].from_socket
 	reverse_expressions[socket] = return_exp
+
+	log.debug(expression_log_prefix + "end field:"+field_path)
+
 	return return_exp
 
 def get_expression_inner(field, exp_list):
 
 	node = field.links[0].from_node
 	socket = field.links[0].from_socket
-	log.debug("getting node:"+node.name+" output:"+socket.name)
+	log.debug(f"{expression_log_prefix} get_expression_inner {node.name} {socket.name}")
 	# if this node is already exported, connect to that instead
 	# I am considering in
 	if socket in reverse_expressions:
@@ -598,13 +606,23 @@ def get_expression_inner(field, exp_list):
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list)
 		}
+	elif node.type == 'BSDF_REFRACTION':
+		log.warn("BSDF_REFRACTION incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			"Refraction": get_expression(node.inputs['IOR'], exp_list),
+			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	elif node.type == 'BSDF_ANISOTROPIC':
+		log.warn("BSDF_ANISOTROPIC incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			# TODO: read inputs 'Anisotropy' and 'Rotation' and 'Tangent'
+		}
 
-	if bsdf:
-		if "Normal" in node.inputs:
-			normal_expression = get_expression(node.inputs['Normal'], exp_list)
-			if normal_expression:
-				bsdf["Normal"] = normal_expression
-		return bsdf
+
 
 	if node.type == 'EMISSION':
 		mult = Node("Multiply")
@@ -623,8 +641,12 @@ def get_expression_inner(field, exp_list):
 
 	if node.type == 'ADD_SHADER':
 		expressions = get_expression(node.inputs[0], exp_list)
+		assert expressions
+
 		expressions1 = get_expression(node.inputs[1], exp_list)
+		assert expressions1
 		for name, exp in expressions1.items():
+
 			if name in expressions:
 				n = Node("Add")
 				n.push(Node("0", expressions[name]))
@@ -635,7 +657,11 @@ def get_expression_inner(field, exp_list):
 		return expressions
 	if node.type == 'MIX_SHADER':
 		expressions = get_expression(node.inputs[1], exp_list)
+		assert expressions
+
 		expressions1 = get_expression(node.inputs[2], exp_list)
+		assert expressions1
+
 		if ("Opacity" in expressions) or ("Opacity" in expressions1):
 			# if there is opacity in any, both should have opacity
 			if "Opacity" not in expressions:
@@ -655,6 +681,16 @@ def get_expression_inner(field, exp_list):
 		return expressions
 
 
+	if field.type == 'SHADER':
+
+		if bsdf:
+			if "Normal" in node.inputs:
+				normal_expression = get_expression(node.inputs['Normal'], exp_list)
+				if normal_expression:
+					bsdf["Normal"] = normal_expression
+		else:
+			log.error(f"couldn't find bsdf for field {field.name}")
+		return bsdf
 	# from here the return type should be {expression:node_idx, OutputIndex: socket_idx}
 	# Add > Input
 
@@ -672,7 +708,8 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'HAIR_INFO':
 	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
 		return exp_layer_weight(socket, exp_list)
-	# if node.type == 'LIGHT_PATH':
+	if node.type == 'LIGHT_PATH':
+		return exp_light_path(socket, exp_list)
 	# if node.type == 'OBJECT_INFO':
 	# if node.type == 'PARTICLE_INFO':
 
@@ -709,15 +746,18 @@ def get_expression_inner(field, exp_list):
 		if not cached_node:
 
 			tex_coord = get_expression(node.inputs['Vector'], exp_list)
+
+			name = ""
 			image = node.image
-			name = sanitize_name(image.name) # name_full?
+			if image:
+				name = sanitize_name(image.name) # name_full?
 
-			# ensure that texture is exported
-			texture = get_or_create_texture(name)
-			if (get_context() == 'NORMAL'):
-				texture.normal_map_flag = True
+				# ensure that texture is exported
+				texture = get_or_create_texture(name)
+				if (get_context() == 'NORMAL'):
+					texture.normal_map_flag = True
 
-			texture.image = image
+				texture.image = image
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
@@ -833,13 +873,17 @@ def pbr_nodetree_material(material):
 		or material.node_tree.get_output_node('CYCLES')
 	)
 
-	global reverse_expressions
-	reverse_expressions = dict()
+	if not output_node:
+		log.warn("material %s with use_nodes does not have nodes" % material.name)
+		return n
 
 	surface_field = output_node.inputs['Surface']
 	if not surface_field.links:
 		log.warn("material %s with use_nodes does not have nodes" % material.name)
 		return n
+
+	global reverse_expressions
+	reverse_expressions = dict()
 
 	expressions = get_expression(surface_field, exp_list)
 	for key, value in expressions.items():
