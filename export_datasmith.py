@@ -523,8 +523,21 @@ def get_expression_inner(field, exp_list):
 	if socket in reverse_expressions:
 		return reverse_expressions[socket]
 
-	# The cases are ordered like in blender Add menu, but shaders are first
-	# TODO: all the shaders are missing normal maps
+	# The cases are ordered like in blender Add menu, others first, shaders second, then the rest
+
+	# these are handled first as these can refer bsdfs
+	if node.type == 'GROUP':
+		# exp = exp_group(node, exp_list)
+		# as exp_group can output shaders (dicts with basecolor/roughness)
+		# or other types of values (dicts with expression:)
+		# it may be better to return as is and handle internally
+		return exp_group(socket, exp_list)# TODO node trees can have multiple outputs
+
+	if node.type == 'GROUP_INPUT':
+		return exp_group_input(socket, exp_list)
+
+	if node.type == 'REROUTE':
+		return get_expression(node.inputs['Input'], exp_list)
 
 	# Shader nodes return a dictionary
 	bsdf = None
@@ -548,7 +561,12 @@ def get_expression_inner(field, exp_list):
 			n.push(Node("0", exp_transmission))
 			exp_opacity = {"expression": exp_list.push(n)}
 			bsdf['Opacity'] = exp_opacity
-
+	if node.type == 'EEVEE_SPECULAR':
+		log.warn("EEVEE_SPECULAR incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Base Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+		}
 
 	elif node.type == 'BSDF_DIFFUSE':
 		bsdf = {
@@ -842,18 +860,7 @@ def get_expression_inner(field, exp_list):
 	# Others:
 
 	# if node.type == 'SCRIPT':
-	if node.type == 'GROUP':
-		# exp = exp_group(node, exp_list)
-		# as exp_group can output shaders (dicts with basecolor/roughness)
-		# or other types of values (dicts with expression:)
-		# it may be better to return as is and handle internally
-		return exp_group(socket, exp_list)# TODO node trees can have multiple outputs
 
-	if node.type == 'GROUP_INPUT':
-		return exp_group_input(socket, exp_list)
-
-	if node.type == 'REROUTE':
-		return get_expression(node.inputs['Input'], exp_list)
 
 	log.error("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
