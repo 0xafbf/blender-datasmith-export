@@ -289,17 +289,51 @@ def exp_light_path(socket, exp_list):
 	return {"expression": n}
 
 
-def add_material_curve(curve):
-	curves = datasmith_context["material_curves"]
-	idx = len(curves)
-	curves.append(curve)
-	return idx
+DATASMITH_TEXTURE_SIZE = 256
+
+def add_material_curve2(curve):
+
+	# do some material curves initialization
+	material_curves = datasmith_context["material_curves"]
+	if material_curves is None:
+		material_curves = np.zeros((DATASMITH_TEXTURE_SIZE, DATASMITH_TEXTURE_SIZE, 4))
+		datasmith_context["material_curves"] = material_curves
+		datasmith_context["material_curves_count"] = 0
+
+	mat_curve_idx = datasmith_context["material_curves_count"]
+	datasmith_context["material_curves_count"] = mat_curve_idx + 1
+
+	# check for curve type, do sampling
+	curve_type = type(curve)
+
+	# write texture from top
+	row_idx = DATASMITH_TEXTURE_SIZE - mat_curve_idx - 1
+	values = material_curves[row_idx]
+	factor = DATASMITH_TEXTURE_SIZE - 1
+
+	if curve_type == bpy.types.ColorRamp:
+		for idx in range(DATASMITH_TEXTURE_SIZE):
+			values[idx] = curve.evaluate(idx/factor)
+		log.error("color ramp")
+
+	elif curve_type == bpy.types.CurveMapping:
+		curves = curve.curves
+
+		position = 0
+		for idx in range(DATASMITH_TEXTURE_SIZE):
+			position = idx/factor
+			values[idx, 0] = curves[0].evaluate(position)
+			values[idx, 1] = curves[1].evaluate(position)
+			values[idx, 2] = curves[2].evaluate(position)
+			values[idx, 3] = curves[3].evaluate(position)
+		log.error("curve mapping")
+
+	return mat_curve_idx
 
 def exp_color_ramp(from_node, exp_list):
 	ramp = from_node.color_ramp
-	values = [ramp.evaluate(idx/255) for idx in range(256)]
 
-	idx = add_material_curve(values)
+	idx = add_material_curve2(ramp)
 
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
@@ -328,16 +362,8 @@ def exp_color_ramp(from_node, exp_list):
 def exp_curvergb(from_node, exp_list):
 	mapping = from_node.mapping
 	mapping.initialize()
-	curves = mapping.curves
-	ev = lambda x : (
-		curves[0].evaluate(x),
-		curves[1].evaluate(x),
-		curves[2].evaluate(x),
-		curves[3].evaluate(x),
-	) # the curves[3] is a global multiplier, not an alpha
-	values = [ev(idx/255) for idx in range(256)]
 
-	idx = add_material_curve(values)
+	idx = add_material_curve2(mapping)
 
 	factor = get_expression(from_node.inputs['Fac'], exp_list)
 	color = get_expression(from_node.inputs['Color'], exp_list)
@@ -413,21 +439,24 @@ def exp_group(socket, exp_list):
 	node = socket.node
 	global group_context
 	global reverse_expressions
+	new_context = {}
+	for input in node.inputs:
+		new_context[input.name] = get_expression(input, exp_list)
+
 	previous_reverse = reverse_expressions
 	reverse_expressions = {}
 	previous_context = group_context
-	group_context = {}
-	for input in node.inputs:
-		group_context[input.name] = get_expression(input, exp_list)
+	group_context = new_context
 
 	# now traverse the inner graph
 	output_name = socket.name
 
 	node_tree_outputs = node.node_tree.nodes['Group Output'] # Should we rely on output nodes having the default name?
 	inner_socket = node_tree_outputs.inputs[output_name]
+
 	inner_exp = get_expression(inner_socket, exp_list)
 
-	group_context_dict = previous_context
+	group_context = previous_context
 	reverse_expressions = previous_reverse
 	return inner_exp
 
@@ -1378,6 +1407,29 @@ def get_or_create_mesh(name):
 	meshes.append(new_mesh)
 	return new_mesh
 
+def get_datasmith_curves_image():
+	log.info("baking curves")
+
+	curve_list = datasmith_context["material_curves"]
+	if curve_list is None:
+		return None
+
+	curves_image = None
+	if "datasmith_curves" in bpy.data.images:
+		curves_image = bpy.data.images["datasmith_curves"]
+	else:
+		curves_image = bpy.data.images.new(
+			"datasmith_curves",
+			DATASMITH_TEXTURE_SIZE,
+			DATASMITH_TEXTURE_SIZE,
+			alpha=True,
+			float_buffer=True
+		)
+		curves_image.colorspace_settings.is_data = True
+
+	curves_image.pixels[:] = curve_list.reshape((-1,))
+	return curves_image
+
 datasmith_context = None
 def collect_and_save(context, args, save_path):
 
@@ -1389,7 +1441,7 @@ def collect_and_save(context, args, save_path):
 		"textures": [],
 		"meshes": [],
 		"materials": [],
-		"material_curves": [],
+		"material_curves": None,
 	}
 
 	log.info("collecting objects")
@@ -1417,30 +1469,10 @@ def collect_and_save(context, args, save_path):
 		unique_materials.append(material)
 	material_nodes = [collect_pbr_material(mat) for mat in unique_materials]
 
-	log.info("baking curves")
-	curves_image = None
-	if "datasmith_curves" in bpy.data.images:
-		curves_image = bpy.data.images["datasmith_curves"]
-	else:
-		curves_image = bpy.data.images.new("datasmith_curves", 256, 256, alpha=True, float_buffer=True)
-		curves_image.colorspace_settings.is_data = True
-
-	pixels = curves_image.pixels
-	curve_list = datasmith_context["material_curves"]
-	log.info("curves: "+str(len(curve_list)))
-	for idx, curve in enumerate(curve_list):
-		log.debug("processing curve:%s", idx)
-		row_idx = (255-idx) * 256
-		for i in range(256):
-			pixel_idx = (row_idx + i) * 4
-			curve_i = curve[i]
-			pixels[pixel_idx] = curve_i[0]
-			pixels[pixel_idx+1] = curve_i[1]
-			pixels[pixel_idx+2] = curve_i[2]
-			pixels[pixel_idx+3] = curve_i[3]
-
-	texture = get_or_create_texture("datasmith_curves")
-	texture.image = curves_image
+	curves_image = get_datasmith_curves_image()
+	if curves_image:
+		texture = get_or_create_texture("datasmith_curves")
+		texture.image = curves_image
 
 	log.info("finished collecting, now saving")
 
