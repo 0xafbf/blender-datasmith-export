@@ -7,6 +7,7 @@ import itertools
 import bpy
 import numpy as np
 import logging
+import hashlib
 log = logging.getLogger("bl_datasmith")
 
 def read_array_data(io, data_struct):
@@ -194,9 +195,12 @@ class UDMesh():
 			write_null(file, 4) # WedgeTangentY
 			write_array_data(file, 'fff', self.vertex_normals) # WedgeTangentZ
 
-			write_array_data(file, 'ff', self.uvs) # WedgeTexCoords[0]
+			num_uvs = len(self.uvs)
+			for idx in range(num_uvs):
+				write_array_data(file, 'ff', self.uvs[idx]) # WedgeTexCoords[0]
 
-			write_null(file, 4 * 7) # WedgeTexCoords[1..7]
+			num_empty_uvs = 8 - num_uvs
+			write_null(file, 4 * num_empty_uvs) # WedgeTexCoords[n..7]
 			write_array_data(file, 'BBBB', self.vertex_colors) # WedgeColors
 			# b2 = write_array_data(file, 'BBBB', self.test) # WedgeTexCoords[0]
 
@@ -291,6 +295,7 @@ class UDTexture():
 			n['rgbcurve'] = "1.000000"
 		elif self.normal_map_flag:
 			self.texture_mode = UDTexture.TEXTURE_MODE_NORMAL_GREEN_INV
+			n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
 		elif self.image.colorspace_settings.is_data:
 			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
 			n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
@@ -307,7 +312,7 @@ class UDTexture():
 		return n
 
 	def save(self, basedir, folder_name):
-		log.debug("writing texture:"+self.name)
+		log.info("writing texture:"+self.name)
 		image_path = path.join(basedir, folder_name, self.abs_path())
 		old_path = self.image.filepath_raw
 		self.image.filepath_raw = image_path
@@ -320,10 +325,12 @@ class UDTexture():
 			self.image.filepath_raw = old_path
 
 		if valid_image:
-			import hashlib
-			hash_md5 = hashlib.md5()
-			with open(image_path, "rb") as f:
-				for chunk in iter(lambda: f.read(4096), b""):
-					hash_md5.update(chunk)
-			self.hash = hash_md5.hexdigest()
+			self.hash = calc_hash(image_path)
+
+def calc_hash(image_path):
+	hash_md5 = hashlib.md5()
+	with open(image_path, "rb") as f:
+		for chunk in iter(lambda: f.read(4096), b""):
+			hash_md5.update(chunk)
+	return hash_md5.hexdigest()
 

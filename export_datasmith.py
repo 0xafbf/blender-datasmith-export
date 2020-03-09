@@ -284,18 +284,56 @@ def exp_layer_weight(socket, exp_list):
 	log.error("LAYER_WEIGHT node from unknown socket")
 	return {"expression": expr, "OutputIndex": 0}
 
+def exp_light_path(socket, exp_list):
+	n = exp_scalar(1, exp_list)
+	return {"expression": n}
 
-def add_material_curve(curve):
-	curves = datasmith_context["material_curves"]
-	idx = len(curves)
-	curves.append(curve)
-	return idx
+
+DATASMITH_TEXTURE_SIZE = 256
+
+def add_material_curve2(curve):
+
+	# do some material curves initialization
+	material_curves = datasmith_context["material_curves"]
+	if material_curves is None:
+		material_curves = np.zeros((DATASMITH_TEXTURE_SIZE, DATASMITH_TEXTURE_SIZE, 4))
+		datasmith_context["material_curves"] = material_curves
+		datasmith_context["material_curves_count"] = 0
+
+	mat_curve_idx = datasmith_context["material_curves_count"]
+	datasmith_context["material_curves_count"] = mat_curve_idx + 1
+
+	# check for curve type, do sampling
+	curve_type = type(curve)
+
+	# write texture from top
+	row_idx = DATASMITH_TEXTURE_SIZE - mat_curve_idx - 1
+	values = material_curves[row_idx]
+	factor = DATASMITH_TEXTURE_SIZE - 1
+
+	if curve_type == bpy.types.ColorRamp:
+		for idx in range(DATASMITH_TEXTURE_SIZE):
+			values[idx] = curve.evaluate(idx/factor)
+		log.error("color ramp")
+
+	elif curve_type == bpy.types.CurveMapping:
+		curves = curve.curves
+
+		position = 0
+		for idx in range(DATASMITH_TEXTURE_SIZE):
+			position = idx/factor
+			values[idx, 0] = curves[0].evaluate(position)
+			values[idx, 1] = curves[1].evaluate(position)
+			values[idx, 2] = curves[2].evaluate(position)
+			values[idx, 3] = curves[3].evaluate(position)
+		log.error("curve mapping")
+
+	return mat_curve_idx
 
 def exp_color_ramp(from_node, exp_list):
 	ramp = from_node.color_ramp
-	values = [ramp.evaluate(idx/255) for idx in range(256)]
 
-	idx = add_material_curve(values)
+	idx = add_material_curve2(ramp)
 
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
@@ -324,16 +362,8 @@ def exp_color_ramp(from_node, exp_list):
 def exp_curvergb(from_node, exp_list):
 	mapping = from_node.mapping
 	mapping.initialize()
-	curves = mapping.curves
-	ev = lambda x : (
-		curves[0].evaluate(x),
-		curves[1].evaluate(x),
-		curves[2].evaluate(x),
-		curves[3].evaluate(x),
-	) # the curves[3] is a global multiplier, not an alpha
-	values = [ev(idx/255) for idx in range(256)]
 
-	idx = add_material_curve(values)
+	idx = add_material_curve2(mapping)
 
 	factor = get_expression(from_node.inputs['Fac'], exp_list)
 	color = get_expression(from_node.inputs['Color'], exp_list)
@@ -409,21 +439,24 @@ def exp_group(socket, exp_list):
 	node = socket.node
 	global group_context
 	global reverse_expressions
+	new_context = {}
+	for input in node.inputs:
+		new_context[input.name] = get_expression(input, exp_list)
+
 	previous_reverse = reverse_expressions
 	reverse_expressions = {}
 	previous_context = group_context
-	group_context = {}
-	for input in node.inputs:
-		group_context[input.name] = get_expression(input, exp_list)
+	group_context = new_context
 
 	# now traverse the inner graph
 	output_name = socket.name
 
 	node_tree_outputs = node.node_tree.nodes['Group Output'] # Should we rely on output nodes having the default name?
 	inner_socket = node_tree_outputs.inputs[output_name]
+
 	inner_exp = get_expression(inner_socket, exp_list)
 
-	group_context_dict = previous_context
+	group_context = previous_context
 	reverse_expressions = previous_reverse
 	return inner_exp
 
@@ -457,7 +490,8 @@ def get_expression(field, exp_list):
 	# node inputs, but it does for scalars and colors
 	# TODO: check which cases we should be careful
 	global expression_log_prefix
-	log.debug(expression_log_prefix + "found field:"+field.node.name+"/"+field.name+":"+field.type)
+	field_path = f"{field.node.name}/{field.name}:{field.type}"
+	log.debug(expression_log_prefix + field_path)
 
 	if not field.links:
 		if field.type == 'VALUE':
@@ -503,20 +537,36 @@ def get_expression(field, exp_list):
 
 	socket = field.links[0].from_socket
 	reverse_expressions[socket] = return_exp
+
+	log.debug(expression_log_prefix + "end field:"+field_path)
+
 	return return_exp
 
 def get_expression_inner(field, exp_list):
 
 	node = field.links[0].from_node
 	socket = field.links[0].from_socket
-	log.debug("getting node:"+node.name+" output:"+socket.name)
+	log.debug(f"{expression_log_prefix} get_expression_inner {node.name} {socket.name}")
 	# if this node is already exported, connect to that instead
 	# I am considering in
 	if socket in reverse_expressions:
 		return reverse_expressions[socket]
 
-	# The cases are ordered like in blender Add menu, but shaders are first
-	# TODO: all the shaders are missing normal maps
+	# The cases are ordered like in blender Add menu, others first, shaders second, then the rest
+
+	# these are handled first as these can refer bsdfs
+	if node.type == 'GROUP':
+		# exp = exp_group(node, exp_list)
+		# as exp_group can output shaders (dicts with basecolor/roughness)
+		# or other types of values (dicts with expression:)
+		# it may be better to return as is and handle internally
+		return exp_group(socket, exp_list)# TODO node trees can have multiple outputs
+
+	if node.type == 'GROUP_INPUT':
+		return exp_group_input(socket, exp_list)
+
+	if node.type == 'REROUTE':
+		return get_expression(node.inputs['Input'], exp_list)
 
 	# Shader nodes return a dictionary
 	bsdf = None
@@ -540,7 +590,12 @@ def get_expression_inner(field, exp_list):
 			n.push(Node("0", exp_transmission))
 			exp_opacity = {"expression": exp_list.push(n)}
 			bsdf['Opacity'] = exp_opacity
-
+	if node.type == 'EEVEE_SPECULAR':
+		log.warn("EEVEE_SPECULAR incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Base Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+		}
 
 	elif node.type == 'BSDF_DIFFUSE':
 		bsdf = {
@@ -598,13 +653,23 @@ def get_expression_inner(field, exp_list):
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list)
 		}
+	elif node.type == 'BSDF_REFRACTION':
+		log.warn("BSDF_REFRACTION incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			"Refraction": get_expression(node.inputs['IOR'], exp_list),
+			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
+		}
+	elif node.type == 'BSDF_ANISOTROPIC':
+		log.warn("BSDF_ANISOTROPIC incomplete implementation")
+		bsdf = {
+			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			# TODO: read inputs 'Anisotropy' and 'Rotation' and 'Tangent'
+		}
 
-	if bsdf:
-		if "Normal" in node.inputs:
-			normal_expression = get_expression(node.inputs['Normal'], exp_list)
-			if normal_expression:
-				bsdf["Normal"] = normal_expression
-		return bsdf
+
 
 	if node.type == 'EMISSION':
 		mult = Node("Multiply")
@@ -623,8 +688,12 @@ def get_expression_inner(field, exp_list):
 
 	if node.type == 'ADD_SHADER':
 		expressions = get_expression(node.inputs[0], exp_list)
+		assert expressions
+
 		expressions1 = get_expression(node.inputs[1], exp_list)
+		assert expressions1
 		for name, exp in expressions1.items():
+
 			if name in expressions:
 				n = Node("Add")
 				n.push(Node("0", expressions[name]))
@@ -635,7 +704,11 @@ def get_expression_inner(field, exp_list):
 		return expressions
 	if node.type == 'MIX_SHADER':
 		expressions = get_expression(node.inputs[1], exp_list)
+		assert expressions
+
 		expressions1 = get_expression(node.inputs[2], exp_list)
+		assert expressions1
+
 		if ("Opacity" in expressions) or ("Opacity" in expressions1):
 			# if there is opacity in any, both should have opacity
 			if "Opacity" not in expressions:
@@ -655,6 +728,16 @@ def get_expression_inner(field, exp_list):
 		return expressions
 
 
+	if field.type == 'SHADER':
+
+		if bsdf:
+			if "Normal" in node.inputs:
+				normal_expression = get_expression(node.inputs['Normal'], exp_list)
+				if normal_expression:
+					bsdf["Normal"] = normal_expression
+		else:
+			log.error(f"couldn't find bsdf for field {field.name}")
+		return bsdf
 	# from here the return type should be {expression:node_idx, OutputIndex: socket_idx}
 	# Add > Input
 
@@ -672,7 +755,8 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'HAIR_INFO':
 	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
 		return exp_layer_weight(socket, exp_list)
-	# if node.type == 'LIGHT_PATH':
+	if node.type == 'LIGHT_PATH':
+		return exp_light_path(socket, exp_list)
 	# if node.type == 'OBJECT_INFO':
 	# if node.type == 'PARTICLE_INFO':
 
@@ -709,15 +793,18 @@ def get_expression_inner(field, exp_list):
 		if not cached_node:
 
 			tex_coord = get_expression(node.inputs['Vector'], exp_list)
+
+			name = ""
 			image = node.image
-			name = sanitize_name(image.name) # name_full?
+			if image:
+				name = sanitize_name(image.name) # name_full?
 
-			# ensure that texture is exported
-			texture = get_or_create_texture(name)
-			if (get_context() == 'NORMAL'):
-				texture.normal_map_flag = True
+				# ensure that texture is exported
+				texture = get_or_create_texture(name)
+				if (get_context() == 'NORMAL'):
+					texture.normal_map_flag = True
 
-			texture.image = image
+				texture.image = image
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
@@ -802,18 +889,7 @@ def get_expression_inner(field, exp_list):
 	# Others:
 
 	# if node.type == 'SCRIPT':
-	if node.type == 'GROUP':
-		# exp = exp_group(node, exp_list)
-		# as exp_group can output shaders (dicts with basecolor/roughness)
-		# or other types of values (dicts with expression:)
-		# it may be better to return as is and handle internally
-		return exp_group(socket, exp_list)# TODO node trees can have multiple outputs
 
-	if node.type == 'GROUP_INPUT':
-		return exp_group_input(socket, exp_list)
-
-	if node.type == 'REROUTE':
-		return get_expression(node.inputs['Input'], exp_list)
 
 	log.error("node not handled" + node.type)
 	exp = exp_scalar(0, exp_list)
@@ -833,13 +909,17 @@ def pbr_nodetree_material(material):
 		or material.node_tree.get_output_node('CYCLES')
 	)
 
-	global reverse_expressions
-	reverse_expressions = dict()
+	if not output_node:
+		log.warn("material %s with use_nodes does not have nodes" % material.name)
+		return n
 
 	surface_field = output_node.inputs['Surface']
 	if not surface_field.links:
 		log.warn("material %s with use_nodes does not have nodes" % material.name)
 		return n
+
+	global reverse_expressions
+	reverse_expressions = dict()
 
 	expressions = get_expression(surface_field, exp_list)
 	for key, value in expressions.items():
@@ -985,12 +1065,17 @@ def collect_mesh(bl_mesh, mesh_name):
 
 	umesh.vertex_normals = np.ascontiguousarray(normals, "<f4")
 
-	uvs = np.empty(num_loops* 2, np.float32)
-	uv_data = m.uv_layers[0].data
 
-	uv_data.foreach_get("uv", uvs)
-	uvs[1::2] = 1 - uvs[1::2]
-	umesh.uvs = uvs.reshape((-1, 2))
+	uvs = []
+	num_uvs = min(8, len(m.uv_layers))
+	for idx in range(num_uvs):
+		uv_channel = np.empty(num_loops * 2, np.float32)
+		uv_data = m.uv_layers[idx].data
+		uv_data.foreach_get("uv", uv_channel)
+		uv_channel = uv_channel.reshape((num_loops, 2))
+		uv_channel[:,1] = 1 - uv_channel[:,1]
+		uvs.append(uv_channel)
+	umesh.uvs = uvs
 
 	if (m.vertex_colors):
 		vertex_colors = np.empty(num_loops * 4)
@@ -1050,13 +1135,6 @@ def collect_object(bl_obj,
 		mat_basis = instance_matrix
 
 	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
-
-	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LIGHT':
-		# use this correction because lights/cameras in blender point -Z
-		obj_mat = obj_mat @ matrix_forward
-
-	transform = node_transform(obj_mat)
-	n.push(transform)
 
 	child_nodes = []
 
@@ -1129,8 +1207,10 @@ def collect_object(bl_obj,
 						n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 		elif bl_obj.type == 'CAMERA':
-			n.name = 'Camera'
+
+			obj_mat = obj_mat @ matrix_forward
 			bl_cam = bl_obj.data
+			n.name = 'Camera'
 
 			# TODO
 			# look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
@@ -1147,9 +1227,11 @@ def collect_object(bl_obj,
 			n.push(Node('Post'))
 
 		elif bl_obj.type == 'LIGHT':
-			bl_light = bl_obj.data
 
+			obj_mat = obj_mat @ matrix_forward
+			bl_light = bl_obj.data
 			n.name = 'Light'
+
 			n['type'] = 'PointLight'
 			n['enabled'] = '1'
 			n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
@@ -1210,8 +1292,56 @@ def collect_object(bl_obj,
 				'G': f(light_color[1]),
 				'B': f(light_color[2]),
 				}))
+		elif bl_obj.type == 'LIGHT_PROBE':
+			# TODO: LIGHT PROBE
+			n.name = 'CustomActor'
+			bl_probe = bl_obj.data
+			if bl_probe.type == 'PLANAR':
+				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderPlanarReflection"
+				size = bl_probe.influence_distance * 2.5 # 100 / 40 as the UE4 mirror size is 40m wide
+				obj_mat = obj_mat @ Matrix.Scale(size, 4)
+				# todo: check what does the falloff do
+
+			elif bl_probe.type == 'CUBEMAP':
+				size = bl_probe.influence_distance * 100
+				falloff = bl_probe.falloff # this value is 0..1
+
+				# we need to have into account current object scale
+				## we could also try using min/max if it makes a difference
+				_, _, obj_scale = obj_mat.decompose()
+				avg_scale = (obj_scale.x + obj_scale.y + obj_scale.z) * 0.333333
+
+				if bl_probe.influence_type == 'BOX':
+					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderBoxReflection"
+
+
+					transition_distance = falloff * size * avg_scale
+					prop = Node("KeyValueProperty", {"name": "TransitionDistance", "type":"Float", "val": "%.6f"%transition_distance})
+					n.push(prop)
+					obj_mat = obj_mat @ Matrix.Scale(size, 4)
+				else: # if bl_probe.type == 'ELIPSOID'
+					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderSphereReflection"
+					probe_radius = size * avg_scale
+					radius = Node("KeyValueProperty", {"name": "Radius", "type":"Float", "val": "%.6f"%probe_radius})
+					n.push(radius)
+			elif bl_probe.type == 'GRID':
+				# for now we just export to custom object, but it doesn't affect the render on
+				# the unreal side. would be cool if it made a difference by setting volumetric importance volume
+				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderGridProbe"
+
+				# blender influence_distance is outwards, maybe we should grow the object to match?
+				# outward_influence would be 1.0 + influence_distance / size maybe?
+				# obj_mat = obj_mat @ Matrix.Scale(outward_influence, 4)
+
+
+			else:
+				log.error("unhandled light probe")
 		else:
 			log.error("unrecognized object type: %s" % bl_obj.type)
+
+	# set transform at the end, lets the transform be changed depending on its type
+	transform = node_transform(obj_mat)
+	n.push(transform)
 
 	# just to make children appear last
 
@@ -1327,6 +1457,29 @@ def get_or_create_mesh(name):
 	meshes.append(new_mesh)
 	return new_mesh
 
+def get_datasmith_curves_image():
+	log.info("baking curves")
+
+	curve_list = datasmith_context["material_curves"]
+	if curve_list is None:
+		return None
+
+	curves_image = None
+	if "datasmith_curves" in bpy.data.images:
+		curves_image = bpy.data.images["datasmith_curves"]
+	else:
+		curves_image = bpy.data.images.new(
+			"datasmith_curves",
+			DATASMITH_TEXTURE_SIZE,
+			DATASMITH_TEXTURE_SIZE,
+			alpha=True,
+			float_buffer=True
+		)
+		curves_image.colorspace_settings.is_data = True
+
+	curves_image.pixels[:] = curve_list.reshape((-1,))
+	return curves_image
+
 datasmith_context = None
 def collect_and_save(context, args, save_path):
 
@@ -1338,7 +1491,7 @@ def collect_and_save(context, args, save_path):
 		"textures": [],
 		"meshes": [],
 		"materials": [],
-		"material_curves": [],
+		"material_curves": None,
 	}
 
 	log.info("collecting objects")
@@ -1366,30 +1519,10 @@ def collect_and_save(context, args, save_path):
 		unique_materials.append(material)
 	material_nodes = [collect_pbr_material(mat) for mat in unique_materials]
 
-	log.info("baking curves")
-	curves_image = None
-	if "datasmith_curves" in bpy.data.images:
-		curves_image = bpy.data.images["datasmith_curves"]
-	else:
-		curves_image = bpy.data.images.new("datasmith_curves", 256, 256, alpha=True, float_buffer=True)
-		curves_image.colorspace_settings.is_data = True
-
-	pixels = curves_image.pixels
-	curve_list = datasmith_context["material_curves"]
-	log.info("curves: "+str(len(curve_list)))
-	for idx, curve in enumerate(curve_list):
-		log.debug("processing curve:%s", idx)
-		row_idx = (255-idx) * 256
-		for i in range(256):
-			pixel_idx = (row_idx + i) * 4
-			curve_i = curve[i]
-			pixels[pixel_idx] = curve_i[0]
-			pixels[pixel_idx+1] = curve_i[1]
-			pixels[pixel_idx+2] = curve_i[2]
-			pixels[pixel_idx+3] = curve_i[3]
-
-	texture = get_or_create_texture("datasmith_curves")
-	texture.image = curves_image
+	curves_image = get_datasmith_curves_image()
+	if curves_image:
+		texture = get_or_create_texture("datasmith_curves")
+		texture.image = curves_image
 
 	log.info("finished collecting, now saving")
 
