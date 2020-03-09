@@ -1069,13 +1069,6 @@ def collect_mesh(bl_mesh, mesh_name):
 	uvs = []
 	num_uvs = min(8, len(m.uv_layers))
 	for idx in range(num_uvs):
-		if idx > 0:
-			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
-			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
-			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
-			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
-			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
-
 		uv_channel = np.empty(num_loops * 2, np.float32)
 		uv_data = m.uv_layers[idx].data
 		uv_data.foreach_get("uv", uv_channel)
@@ -1303,7 +1296,13 @@ def collect_object(bl_obj,
 			# TODO: LIGHT PROBE
 			n.name = 'CustomActor'
 			bl_probe = bl_obj.data
-			if bl_probe.type == 'CUBEMAP':
+			if bl_probe.type == 'PLANAR':
+				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderPlanarReflection"
+				size = bl_probe.influence_distance * 2.5 # 100 / 40 as the UE4 mirror size is 40m wide
+				obj_mat = obj_mat @ Matrix.Scale(size, 4)
+				# todo: check what does the falloff do
+
+			elif bl_probe.type == 'CUBEMAP':
 				size = bl_probe.influence_distance * 100
 				falloff = bl_probe.falloff # this value is 0..1
 
@@ -1326,6 +1325,8 @@ def collect_object(bl_obj,
 					radius = Node("KeyValueProperty", {"name": "Radius", "type":"Float", "val": "%.6f"%probe_radius})
 					n.push(radius)
 			elif bl_probe.type == 'GRID':
+				# for now we just export to custom object, but it doesn't affect the render on
+				# the unreal side. would be cool if it made a difference by setting volumetric importance volume
 				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderGridProbe"
 
 				# blender influence_distance is outwards, maybe we should grow the object to match?
