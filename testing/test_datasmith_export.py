@@ -44,6 +44,7 @@ log.info("Starting automated export")
 custom_args = {}
 custom_args["experimental_tex_mode"] = True
 custom_args["apply_modifiers"] = True
+custom_args["use_profiling"] = False
 
 
 bpy.ops.export_scene.datasmith(filepath=target_path, **custom_args)
@@ -51,8 +52,9 @@ log.info("Ended automated export")
 
 # right now this is not so useful as the export is non deterministic
 # i guess it is because the usage of dictionaries
-
-if backup_path:
+do_file_diff = False
+# todo: if size is less than 2MB
+if backup_path and do_file_diff:
 	log.info("writing diff file")
 	import difflib
 
