@@ -4,7 +4,7 @@ Export your Blender scene to UE4 using the Datasmith format.
 
 It aims to export all the Datasmith format supports. For now it exports:
 
-* __Meshes__ with normals, vertex colors and UV coordinates.
+* __Meshes__ with normals, vertex colors and up to 8 UV channels.
 * __Hierarchy__ is exported keeping meshes references, transforms, parents and
 per-instance material overrides from blender.
 * __Textures and materials__ are exported using data from the shader graphs.
@@ -13,6 +13,7 @@ Materials are closely approximated and a good amount of nodes are supported
 * __Cameras__ are exported trying to match Blender data, keeping focus
 distance, focal length, and aperture
 * __Lights__ are exported, keeping their type, power, color and size data.
+* __Reflection probes__ including Planar, Sphere and Box captures.
 
 Check out an overview of a previous version here:
 https://youtu.be/bUUDqerdqAc
