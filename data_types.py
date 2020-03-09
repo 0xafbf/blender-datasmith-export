@@ -195,9 +195,12 @@ class UDMesh():
 			write_null(file, 4) # WedgeTangentY
 			write_array_data(file, 'fff', self.vertex_normals) # WedgeTangentZ
 
-			write_array_data(file, 'ff', self.uvs) # WedgeTexCoords[0]
+			num_uvs = len(self.uvs)
+			for idx in range(num_uvs):
+				write_array_data(file, 'ff', self.uvs[idx]) # WedgeTexCoords[0]
 
-			write_null(file, 4 * 7) # WedgeTexCoords[1..7]
+			num_empty_uvs = 8 - num_uvs
+			write_null(file, 4 * num_empty_uvs) # WedgeTexCoords[n..7]
 			write_array_data(file, 'BBBB', self.vertex_colors) # WedgeColors
 			# b2 = write_array_data(file, 'BBBB', self.test) # WedgeTexCoords[0]
 
@@ -309,7 +312,7 @@ class UDTexture():
 		return n
 
 	def save(self, basedir, folder_name):
-		log.debug("writing texture:"+self.name)
+		log.info("writing texture:"+self.name)
 		image_path = path.join(basedir, folder_name, self.abs_path())
 		old_path = self.image.filepath_raw
 		self.image.filepath_raw = image_path

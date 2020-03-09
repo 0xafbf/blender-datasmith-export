@@ -1065,12 +1065,24 @@ def collect_mesh(bl_mesh, mesh_name):
 
 	umesh.vertex_normals = np.ascontiguousarray(normals, "<f4")
 
-	uvs = np.empty(num_loops* 2, np.float32)
-	uv_data = m.uv_layers[0].data
 
-	uv_data.foreach_get("uv", uvs)
-	uvs[1::2] = 1 - uvs[1::2]
-	umesh.uvs = uvs.reshape((-1, 2))
+	uvs = []
+	num_uvs = min(8, len(m.uv_layers))
+	for idx in range(num_uvs):
+		if idx > 0:
+			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
+			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
+			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
+			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
+			log.error("mesh:%s exporting uv:%d" % (mesh_name, idx))
+
+		uv_channel = np.empty(num_loops * 2, np.float32)
+		uv_data = m.uv_layers[idx].data
+		uv_data.foreach_get("uv", uv_channel)
+		uv_channel = uv_channel.reshape((num_loops, 2))
+		uv_channel[:,1] = 1 - uv_channel[:,1]
+		uvs.append(uv_channel)
+	umesh.uvs = uvs
 
 	if (m.vertex_colors):
 		vertex_colors = np.empty(num_loops * 4)
