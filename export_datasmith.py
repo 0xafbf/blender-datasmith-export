@@ -1131,13 +1131,6 @@ def collect_object(bl_obj,
 
 	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
-	if bl_obj.type == 'CAMERA' or bl_obj.type == 'LIGHT':
-		# use this correction because lights/cameras in blender point -Z
-		obj_mat = obj_mat @ matrix_forward
-
-	transform = node_transform(obj_mat)
-	n.push(transform)
-
 	child_nodes = []
 
 	for child in bl_obj.children:
@@ -1209,8 +1202,10 @@ def collect_object(bl_obj,
 						n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 		elif bl_obj.type == 'CAMERA':
-			n.name = 'Camera'
+
+			obj_mat = obj_mat @ matrix_forward
 			bl_cam = bl_obj.data
+			n.name = 'Camera'
 
 			# TODO
 			# look_at_actor = sanitize_name(bl_cam.dof.focus_object.name)
@@ -1227,9 +1222,11 @@ def collect_object(bl_obj,
 			n.push(Node('Post'))
 
 		elif bl_obj.type == 'LIGHT':
-			bl_light = bl_obj.data
 
+			obj_mat = obj_mat @ matrix_forward
+			bl_light = bl_obj.data
 			n.name = 'Light'
+
 			n['type'] = 'PointLight'
 			n['enabled'] = '1'
 			n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
@@ -1290,8 +1287,48 @@ def collect_object(bl_obj,
 				'G': f(light_color[1]),
 				'B': f(light_color[2]),
 				}))
+		elif bl_obj.type == 'LIGHT_PROBE':
+			# TODO: LIGHT PROBE
+			n.name = 'CustomActor'
+			bl_probe = bl_obj.data
+			if bl_probe.type == 'CUBEMAP':
+				size = bl_probe.influence_distance * 100
+				falloff = bl_probe.falloff # this value is 0..1
+
+				# we need to have into account current object scale
+				## we could also try using min/max if it makes a difference
+				_, _, obj_scale = obj_mat.decompose()
+				avg_scale = (obj_scale.x + obj_scale.y + obj_scale.z) * 0.333333
+
+				if bl_probe.influence_type == 'BOX':
+					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderBoxReflection"
+
+
+					transition_distance = falloff * size * avg_scale
+					prop = Node("KeyValueProperty", {"name": "TransitionDistance", "type":"Float", "val": "%.6f"%transition_distance})
+					n.push(prop)
+					obj_mat = obj_mat @ Matrix.Scale(size, 4)
+				else: # if bl_probe.type == 'ELIPSOID'
+					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderSphereReflection"
+					probe_radius = size * avg_scale
+					radius = Node("KeyValueProperty", {"name": "Radius", "type":"Float", "val": "%.6f"%probe_radius})
+					n.push(radius)
+			elif bl_probe.type == 'GRID':
+				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderGridProbe"
+
+				# blender influence_distance is outwards, maybe we should grow the object to match?
+				# outward_influence would be 1.0 + influence_distance / size maybe?
+				# obj_mat = obj_mat @ Matrix.Scale(outward_influence, 4)
+
+
+			else:
+				log.error("unhandled light probe")
 		else:
 			log.error("unrecognized object type: %s" % bl_obj.type)
+
+	# set transform at the end, lets the transform be changed depending on its type
+	transform = node_transform(obj_mat)
+	n.push(transform)
 
 	# just to make children appear last
 
