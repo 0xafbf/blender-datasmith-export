@@ -54,21 +54,26 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 						"(This may break mesh instancing)",
 			default=False,
 		)
+	experimental_tex_mode: BoolProperty(
+			name="Use sRGB support (UE4 4.25)",
+			description="Disables the gamma hack to export masks correctly",
+			default=False,
+		)
 	use_logging: BoolProperty(
 			name="Enable logging",
 			description="Enable logging to Window > System console",
 			default=False,
 		)
-	experimental_tex_mode: BoolProperty(
-			name="Use sRGB support (UE4 4.25)",
-			description="Disables the gamma hack to export masks correctly",
+	use_profiling: BoolProperty(
+			name="Enable profiling",
+			description="For development only, writes a python profile 'datasmith.prof'",
 			default=False,
 		)
 
 	def execute(self, context):
 		keywords = self.as_keywords(ignore=("filter_glob",))
 		from . import export_datasmith
-		profile = False
+		profile = keywords["use_profiling"]
 		if not profile:
 			return export_datasmith.save(context, **keywords)
 		else:
