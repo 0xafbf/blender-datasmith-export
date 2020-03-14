@@ -302,7 +302,7 @@ def add_material_curve2(curve):
 
 	mat_curve_idx = datasmith_context["material_curves_count"]
 	datasmith_context["material_curves_count"] = mat_curve_idx + 1
-
+	log.info("writing curve:%s" % mat_curve_idx)
 	# check for curve type, do sampling
 	curve_type = type(curve)
 
@@ -1567,32 +1567,38 @@ def collect_and_save(context, args, save_path):
 	end_time = time.monotonic()
 	total_time = end_time - start_time
 
-	log.info("preparing data took:%f"%total_time)
+	log.info("generating datasmith data took:%f"%total_time)
 	n.push(
 		Node("Export", {"Duration":total_time})
 	)
 
+	log.info("generating xml")
 	result = n.string_rep(first=True)
 
-	log.info("writing to file")
 	filename = path.join(basedir, file_name + '.udatasmith')
+	log.info("writing to file:%s" % filename)
 	with open(filename, 'w') as f:
 		f.write(result)
-	log.info("export successful")
+	log.info("export finished")
 
 
 
 def save(context,*, filepath, **kwargs):
 
-	use_logging = False
 	handler = None
-	if "use_logging" in kwargs:
-		use_logging = bool(kwargs["use_logging"])
+	use_logging = bool(kwargs["use_logging"])
 
 	if use_logging:
-		handler = logging.FileHandler(filepath + ".log", mode='w')
-		log.addHandler(handler)
+		log_path = filepath + ".log"
+		handler = logging.FileHandler(log_path, mode='w')
 
+		formatter = logging.Formatter(
+			fmt='%(asctime)s.%(msecs)03d %(levelname)-8s %(message)s',
+			datefmt='%Y-%m-%d %H:%M:%S'
+		)
+		handler.setFormatter(formatter)
+		log.addHandler(handler)
+		log.setLevel(logging.DEBUG)
 	try:
 		from os import path
 		basepath, ext = path.splitext(filepath)
@@ -1608,6 +1614,7 @@ def save(context,*, filepath, **kwargs):
 
 	finally:
 		if use_logging:
+			log.info("Finished logging to path:" + log_path)
 			handler.close()
 			log.removeHandler(handler)
 
