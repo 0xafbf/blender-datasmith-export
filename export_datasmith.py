@@ -339,7 +339,7 @@ def exp_color_ramp(from_node, exp_list):
 
 	curve_idx = exp_scalar(idx, exp_list)
 	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 	n = Node("Add")
 	n.push(Node("0", {"expression": curve_idx}))
 	n.push(Node("1", {"expression": pixel_offset}))
@@ -370,7 +370,7 @@ def exp_curvergb(from_node, exp_list):
 
 	curve_idx = exp_scalar(idx, exp_list)
 	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 	n = Node("Add")
 	n.push(Node("0", {"expression": curve_idx}))
 	n.push(Node("1", {"expression": pixel_offset}))
@@ -1476,6 +1476,7 @@ def get_datasmith_curves_image():
 			float_buffer=True
 		)
 		curves_image.colorspace_settings.is_data = True
+		curves_image.file_format = 'OPEN_EXR'
 
 	curves_image.pixels[:] = curve_list.reshape((-1,))
 	return curves_image
