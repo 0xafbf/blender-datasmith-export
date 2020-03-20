@@ -994,7 +994,11 @@ def collect_pbr_material(material):
 
 import numpy as np
 
-def mesh_copy_triangulated(bl_mesh):
+
+
+
+def fill_umesh(umesh, bl_mesh):
+	# create copy to triangulate
 	m = bl_mesh.copy()
 	m.transform(matrix_datasmith)
 	bm = bmesh.new()
@@ -1006,29 +1010,8 @@ def mesh_copy_triangulated(bl_mesh):
 	bm.free()
 	# not sure if this is the best way to read normals
 	m.calc_normals_split()
-	return m
 
-
-
-def collect_mesh(bl_mesh, mesh_name):
-
-	# when using linked libraries, some meshes can have the same name
-	mesh_name = sanitize_name(mesh_name)
-	if bl_mesh.library:
-		#import pdb; pdb.set_trace()
-		lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
-		prefix = lib_path.strip('_')
-		if prefix.endswith('_blend'):
-			prefix = prefix[:-6] + '_'
-		mesh_name = prefix + mesh_name
-
-	umesh = get_or_create_mesh(mesh_name)
-	if len(umesh.vertices) > 0:
-		# mesh already processed
-		return umesh
-	# create copy to triangulate
-
-	m = mesh_copy_triangulated(bl_mesh)
+	#finish inline mesh_copy_triangulate
 
 	for idx, mat in enumerate(bl_mesh.materials):
 		umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
@@ -1180,10 +1163,11 @@ def collect_object(bl_obj,
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
 
-
-		if bl_obj.type == 'EMPTY':
-			pass
-		elif bl_obj.type == 'MESH':
+		# I think that these should be ordered by how common they are
+		#
+		#if bl_obj.type == 'EMPTY':
+		#	pass
+		if bl_obj.type == 'MESH':
 			bl_mesh = bl_obj.data
 			bl_mesh_name = bl_mesh.name
 
@@ -1191,16 +1175,65 @@ def collect_object(bl_obj,
 				bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
 				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
 
-			if len(bl_mesh.polygons) > 0:
-				n.name = 'ActorMesh'
-				material_list = datasmith_context["materials"]
-				for slot in bl_obj.material_slots:
-					material_list.append(slot.material)
+			if bl_mesh.library:
+				lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
+				prefix = lib_path.strip("_")
+				if prefix.endswith("_blend"):
+					prefix = prefix[:-6] + "_"
+				bl_mesh_name = prefix + bl_mesh_name
 
-				umesh = collect_mesh(bl_mesh, bl_mesh_name)
+
+			bl_mesh_name = sanitize_name(bl_mesh_name)
+			meshes = datasmith_context["meshes"]
+			umesh = None
+			for mesh in meshes:
+				if bl_mesh_name == mesh.name:
+					umesh = mesh
+
+			if umesh == None:
+				if len(bl_mesh.polygons) > 0:
+					umesh = UDMesh(bl_mesh_name)
+					meshes.append(umesh)
+					fill_umesh(umesh, bl_mesh)
+					material_list = datasmith_context["materials"]
+					for slot in bl_obj.material_slots:
+						material_list.append(slot.material)
+
+			if umesh:
+				n.name = 'ActorMesh'
 				n.push(Node('mesh', {'name': umesh.name}))
 
 				for idx, slot in enumerate(bl_obj.material_slots):
+					if slot.link == 'OBJECT':
+						#collect_materials([slot.material], uscene)
+						safe_name = sanitize_name(slot.material.name)
+						n.push(Node('material', {'id':idx, 'name':safe_name}))
+
+		elif bl_obj.type == 'CURVE':
+
+			# as we cannot get geometry before evaluating depsgraph,
+			# we better evaluate first, and check if it has polygons.
+			# this might end with repeated geometry, gotta find solution.
+			# maybe cache "evaluated curve without modifiers"?
+
+			bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
+			if len(bl_mesh.polygons) > 0:
+				bl_curve = bl_obj.data
+				bl_curve_name = "%s_%s" % (bl_curve.name, bl_obj.name)
+				bl_curve_name = sanitize_name(bl_curve_name)
+
+				umesh = UDMesh(bl_curve_name)
+				meshes = datasmith_context["meshes"]
+				meshes.append(umesh)
+
+				fill_umesh(umesh, bl_mesh)
+				material_list = datasmith_context["materials"]
+
+				n.name = 'ActorMesh'
+				n.push(Node('mesh', {'name': umesh.name}))
+
+				for idx, slot in enumerate(bl_obj.material_slots):
+					material_list.append(slot.material)
 					if slot.link == 'OBJECT':
 						#collect_materials([slot.material], uscene)
 						safe_name = sanitize_name(slot.material.name)
@@ -1225,7 +1258,7 @@ def collect_object(bl_obj,
 			n.push(node_value('FStop', bl_cam.dof.aperture_fstop))
 			n.push(node_value('FocalLength', bl_cam.lens))
 			n.push(Node('Post'))
-
+		# maybe move up as lights are more common?
 		elif bl_obj.type == 'LIGHT':
 
 			obj_mat = obj_mat @ matrix_forward
@@ -1447,15 +1480,6 @@ def get_or_create_texture(name):
 	new_tex = UDTexture(name)
 	textures.append(new_tex)
 	return new_tex
-
-def get_or_create_mesh(name):
-	meshes = datasmith_context["meshes"]
-	for mesh in meshes:
-		if name == mesh.name:
-			return mesh
-	new_mesh = UDMesh(name)
-	meshes.append(new_mesh)
-	return new_mesh
 
 def get_datasmith_curves_image():
 	log.info("baking curves")
