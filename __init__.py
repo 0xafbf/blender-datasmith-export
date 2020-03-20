@@ -43,6 +43,7 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
 
+
 	export_selected: BoolProperty(
 			name="Export selected objects",
 			description="Exports only the selected objects",
@@ -51,7 +52,13 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	apply_modifiers: BoolProperty(
 			name="Apply modifiers",
 			description="Applies geometry modifiers when exporting. "
-						"(This may break mesh instancing)",
+				"(This may break mesh instancing)",
+			default=False,
+		)
+	minimal_export: BoolProperty(
+			name="Skip meshes and textures",
+			description="Allows for faster exporting, useful if you only changed "
+				"transforms or shaders",
 			default=False,
 		)
 	experimental_tex_mode: BoolProperty(

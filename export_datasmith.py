@@ -5,8 +5,9 @@ import bmesh
 import math
 import os
 import time
+import hashlib
 from os import path
-from .data_types import UDMesh, Node, UDTexture, sanitize_name
+from .data_types import UDMesh, Node, sanitize_name
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -416,8 +417,7 @@ def exp_bump(node, exp_list):
 			name = sanitize_name(image.name)
 
 			# ensure that texture is exported
-			texture = get_or_create_texture(name)
-			texture.image = image
+			get_or_create_texture(name, image)
 
 			image_object = exp_texture_object(name, exp_list)
 			bump_node = Node("FunctionCall", { "Function": op_custom_functions["NORMAL_FROM_HEIGHT"]})
@@ -800,11 +800,8 @@ def get_expression_inner(field, exp_list):
 				name = sanitize_name(image.name) # name_full?
 
 				# ensure that texture is exported
-				texture = get_or_create_texture(name)
-				if (get_context() == 'NORMAL'):
-					texture.normal_map_flag = True
-
-				texture.image = image
+				texture_type = get_context() or 'SRGB'
+				get_or_create_texture(name, image, texture_type)
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
@@ -1414,8 +1411,7 @@ def collect_environment(world):
 	image = source_node.image
 
 	tex_name = sanitize_name(image.name)
-	texture = get_or_create_texture(tex_name)
-	texture.image = image
+	get_or_create_texture(tex_name, image)
 
 	tex_node = Node("Texture", {
 		"tex": tex_name,
@@ -1471,13 +1467,15 @@ def get_file_header():
 	return n
 
 
-def get_or_create_texture(name):
+# in_type can be SRGB, LINEAR or NORMAL
+def get_or_create_texture(in_name, in_image, in_type='SRGB'):
 	textures = datasmith_context["textures"]
-	for tex in textures:
-		if name == tex.name:
+	for name, tex, _ in textures:
+		if name == in_name:
 			return tex
-	log.debug("collecting texture:%s" % name)
-	new_tex = UDTexture(name)
+	log.debug("collecting texture:%s" % in_name)
+
+	new_tex = (in_name, in_image, in_type)
 	textures.append(new_tex)
 	return new_tex
 
@@ -1505,6 +1503,79 @@ def get_datasmith_curves_image():
 	curves_image.pixels[:] = curve_list.reshape((-1,))
 	return curves_image
 
+
+TEXTURE_MODE_DIFFUSE = "0"
+TEXTURE_MODE_SPECULAR = "1"
+TEXTURE_MODE_NORMAL = "2"
+TEXTURE_MODE_NORMAL_GREEN_INV = "3"
+TEXTURE_MODE_DISPLACE = "4"
+TEXTURE_MODE_OTHER = "5"
+TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
+
+# saves image, and generates node with image description to add to export
+def save_texture(texture, basedir, folder_name, minimal_export = False, experimental_tex_mode=True):
+	name, image, img_type = texture
+
+	log.info("writing texture:"+name)
+
+	ext = ".png"
+	if image.file_format == 'JPEG':
+		ext = ".jpg"
+	elif image.file_format == 'HDR':
+		ext = ".hdr"
+	elif image.file_format == 'OPEN_EXR':
+		ext = ".exr"
+	safe_name = sanitize_name(name) + ext
+
+	image_path = path.join(basedir, folder_name, safe_name)
+	old_path = image.filepath_raw
+	image.filepath_raw = image_path
+
+	# fix for invalid images, like one in mr_elephant sample.
+	valid_image = (image.channels != 0)
+	if valid_image and not minimal_export:
+		image.save()
+	if old_path:
+		image.filepath_raw = old_path
+
+	img_hash = None
+	if valid_image:
+		img_hash = calc_hash(image_path)
+
+	n = Node('Texture')
+	n['name'] = name
+	n['file'] = path.join(folder_name, safe_name)
+	n['rgbcurve'] = 0.0
+	n['srgb'] = "1" # this parameter is only read on 4.25 onwards
+
+	n['texturemode'] = TEXTURE_MODE_DIFFUSE
+	if image.file_format == 'HDR':
+		n['texturemode'] = TEXTURE_MODE_OTHER
+		n['rgbcurve'] = "1.000000"
+	elif img_type == 'NORMAL':
+		n['texturemode'] = TEXTURE_MODE_NORMAL_GREEN_INV
+		n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
+	elif image.colorspace_settings.is_data:
+		n['texturemode'] = TEXTURE_MODE_SPECULAR
+		n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
+		if not experimental_tex_mode:
+			# use this hack if not using experimental mode
+			n['rgbcurve'] = "0.454545"
+
+	n['texturefilter'] = "3"
+	if img_hash:
+		n.push(Node('Hash', {'value': img_hash}))
+	return n
+
+
+def calc_hash(image_path):
+	hash_md5 = hashlib.md5()
+	with open(image_path, "rb") as f:
+		for chunk in iter(lambda: f.read(4096), b""):
+			hash_md5.update(chunk)
+	return hash_md5.hexdigest()
+
+
 datasmith_context = None
 def collect_and_save(context, args, save_path):
 
@@ -1528,6 +1599,7 @@ def collect_and_save(context, args, save_path):
 
 	selected_only = args["export_selected"]
 	apply_modifiers = args["apply_modifiers"]
+	minimal_export = args["minimal_export"]
 	for obj in root_objects:
 		uobj = collect_object(obj, selected_only=selected_only, apply_modifiers=apply_modifiers)
 		if uobj:
@@ -1546,8 +1618,7 @@ def collect_and_save(context, args, save_path):
 
 	curves_image = get_datasmith_curves_image()
 	if curves_image:
-		texture = get_or_create_texture("datasmith_curves")
-		texture.image = curves_image
+		get_or_create_texture("datasmith_curves", curves_image)
 
 	log.info("finished collecting, now saving")
 
@@ -1566,8 +1637,12 @@ def collect_and_save(context, args, save_path):
 
 
 	log.info("writing textures")
+
+	tex_nodes = []
+	use_experimental_tex_mode = args["experimental_tex_mode"]
 	for tex in datasmith_context["textures"]:
-		tex.save(basedir, folder_name)
+		tex_node = save_texture(tex, basedir, folder_name, minimal_export, use_experimental_tex_mode)
+		tex_nodes.append(tex_node)
 
 	log.info("building XML tree")
 
@@ -1584,10 +1659,9 @@ def collect_and_save(context, args, save_path):
 	for mat in material_nodes:
 		n.push(mat)
 
-	use_experimental_tex_mode = args["experimental_tex_mode"]
 	print("Using experimental tex mode:%s", use_experimental_tex_mode)
-	for tex in datasmith_context["textures"]:
-		n.push(tex.node(folder_name, use_experimental_tex_mode))
+	for tex in tex_nodes:
+		n.push(tex)
 
 	end_time = time.monotonic()
 	total_time = end_time - start_time
