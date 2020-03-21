@@ -315,7 +315,6 @@ def add_material_curve2(curve):
 	if curve_type == bpy.types.ColorRamp:
 		for idx in range(DATASMITH_TEXTURE_SIZE):
 			values[idx] = curve.evaluate(idx/factor)
-		log.error("color ramp")
 
 	elif curve_type == bpy.types.CurveMapping:
 		curves = curve.curves
@@ -327,9 +326,15 @@ def add_material_curve2(curve):
 			values[idx, 1] = curves[1].evaluate(position)
 			values[idx, 2] = curves[2].evaluate(position)
 			values[idx, 3] = curves[3].evaluate(position)
-		log.error("curve mapping")
 
 	return mat_curve_idx
+
+def exp_blackbody(from_node, exp_list):
+	n = Node("BlackBody")
+	exp_0 = get_expression(from_node.inputs[0], exp_list)
+	n.push(Node("0", exp_0))
+	exp = exp_list.push(n)
+	return {"expression": exp}
 
 def exp_color_ramp(from_node, exp_list):
 	ramp = from_node.color_ramp
@@ -863,7 +868,8 @@ def get_expression_inner(field, exp_list):
 
 	# Add > Converter
 
-	# if node.type == 'BLACKBODY':
+	if node.type == 'BLACKBODY':
+		return exp_blackbody(node, exp_list)
 	if node.type == 'VALTORGB':
 		exp = exp_color_ramp(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
@@ -1161,10 +1167,9 @@ def collect_object(bl_obj,
 					dup_idx += 1
 
 		# I think that these should be ordered by how common they are
-		#
-		#if bl_obj.type == 'EMPTY':
-		#	pass
-		if bl_obj.type == 'MESH':
+		if bl_obj.type == 'EMPTY':
+			pass
+		elif bl_obj.type == 'MESH':
 			bl_mesh = bl_obj.data
 			bl_mesh_name = bl_mesh.name
 
