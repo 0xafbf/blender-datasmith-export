@@ -9,6 +9,7 @@ Features marked with `*` require the UE4 plugin to work.
 + Added new material nodes:
   - Blackbody
   - Bright/Contrast*
+  - Object Info
 
 ### Fixed
 * Improved materials rgb_curves node support

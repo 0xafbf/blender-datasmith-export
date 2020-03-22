@@ -300,6 +300,23 @@ def exp_light_path(socket, exp_list):
 	return {"expression": n}
 
 
+def exp_object_info(socket, exp_list):
+	field = socket.name
+	if field == "Location":
+		# TODO: check if we need to transform these to blender space
+		exp = exp_list.push(Node("ObjectPositionWS"))
+	elif field == "Random":
+		exp = exp_list.push(Node("PerInstanceRandom"))
+	elif field == "Object Index":
+		log.warning("Node Object Info>Object Index translated to random as it is used to randomize too")
+		exp = exp_list.push(Node("PerInstanceRandom"))
+	else:
+		log.error("Can't write Material node 'Object Info' field:%s" % field)
+		exp = exp_scalar(0, exp_list)
+
+	return {"expression": exp, "OutputIndex": 0}
+
+
 DATASMITH_TEXTURE_SIZE = 256
 
 def add_material_curve2(curve):
@@ -772,7 +789,8 @@ def get_expression_inner(field, exp_list):
 		return exp_layer_weight(socket, exp_list)
 	if node.type == 'LIGHT_PATH':
 		return exp_light_path(socket, exp_list)
-	# if node.type == 'OBJECT_INFO':
+	if node.type == 'OBJECT_INFO':
+		return exp_object_info(socket, exp_list)
 	# if node.type == 'PARTICLE_INFO':
 
 	if node.type == 'RGB':
@@ -908,7 +926,7 @@ def get_expression_inner(field, exp_list):
 
 
 def pbr_nodetree_material(material):
-	log.debug("collecting material:"+material.name)
+	log.info("Collecting material: "+material.name)
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
@@ -1620,7 +1638,7 @@ def collect_and_save(context, args, save_path):
 
 	environment = collect_environment(context.scene.world)
 
-	log.info("collecting materials")
+	log.info("Collecting materials")
 	materials = datasmith_context["materials"]
 	unique_materials = []
 	for material in materials:
@@ -1710,7 +1728,7 @@ def save(context,*, filepath, **kwargs):
 		)
 		handler.setFormatter(formatter)
 		log.addHandler(handler)
-		log.setLevel(logging.WARNING)
+		log.setLevel(logging.INFO)
 	try:
 		from os import path
 		basepath, ext = path.splitext(filepath)
