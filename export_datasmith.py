@@ -155,6 +155,14 @@ def exp_math(node, exp_list):
 	exp = exp_list.push(n)
 	return {"expression": exp, "OutputIndex": 0}
 
+def exp_gamma(node, exp_list):
+	n = Node(op_map['POWER'])
+	exp_0 = get_expression(node.inputs["Color"], exp_list)
+	n.push(Node("0", exp_0))
+	exp_1 = get_expression(node.inputs["Gamma"], exp_list)
+	n.push(Node("1", exp_1))
+	return {"expression": exp_list.push(n)}
+
 op_map_color = {
 # MIX is handled manually
 	'DARKEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Darken",
@@ -852,7 +860,8 @@ def get_expression_inner(field, exp_list):
 	# Add > Color
 	if node.type == 'BRIGHTCONTRAST':
 		return exp_bright_contrast(node, exp_list)
-	# if node.type == 'GAMMA':
+	if node.type == 'GAMMA':
+		return exp_gamma(node, exp_list)
 	if node.type == 'HUE_SAT':
 		exp = exp_hsv(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}

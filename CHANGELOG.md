@@ -10,6 +10,7 @@ Features marked with `*` require the UE4 plugin to work.
   - Blackbody
   - Bright/Contrast*
   - Object Info
+  - Gamma (Power)
 
 ### Fixed
 * Improved materials rgb_curves node support
