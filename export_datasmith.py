@@ -206,6 +206,7 @@ def exp_mixrgb(node, exp_list):
 	return exp_list.push(lerp)
 
 op_custom_functions = {
+	"BRIGHTCONTRAST":     "/DatasmithBlenderContent/MaterialFunctions/BrightContrast",
 	"CURVE_RGB":          "/DatasmithBlenderContent/MaterialFunctions/RGBCurveLookup",
 	"FRESNEL":            "/DatasmithBlenderContent/MaterialFunctions/BlenderFresnel",
 	"HUE_SAT":            "/DatasmithBlenderContent/MaterialFunctions/AdjustHSV",
@@ -215,7 +216,18 @@ op_custom_functions = {
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
 }
 
-# TODO: this depends on having the material functions in UE4
+
+
+def exp_generic(node, exp_list, node_type, socket_names):
+	n = Node("FunctionCall", { "Function": op_custom_functions[node_type]})
+	for idx, socket_name in enumerate(socket_names):
+		input_expression = get_expression(node.inputs[socket_name], exp_list)
+		n.push(Node(str(idx), input_expression))
+	return {"expression": exp_list.push(n) }
+
+def exp_bright_contrast(node, exp_list):
+	return exp_generic(node, exp_list, 'BRIGHTCONTRAST', ('Color', 'Bright', 'Contrast'))
+
 def exp_hsv(node, exp_list):
 	n = Node("FunctionCall", { "Function": op_custom_functions["HUE_SAT"]})
 	exp_hue = get_expression(node.inputs['Hue'], exp_list)
@@ -228,8 +240,6 @@ def exp_hsv(node, exp_list):
 	n.push(Node("3", exp_fac))
 	exp_color = get_expression(node.inputs['Color'], exp_list)
 	n.push(Node("4", exp_color))
-	# TODO: test in unreal if I have an expression with two inputs which
-	# one takes place, if it crashes or what
 	return exp_list.push(n)
 
 def exp_invert(node, exp_list):
@@ -821,11 +831,9 @@ def get_expression_inner(field, exp_list):
 
 		return { "expression": cached_node, "OutputIndex": output_index }
 
-
 	# Add > Color
 	if node.type == 'BRIGHTCONTRAST':
-		log.warn("unimplemented node BRIGHTCONTRAST")
-		return get_expression(node.inputs['Color'], exp_list)
+		return exp_bright_contrast(node, exp_list)
 	# if node.type == 'GAMMA':
 	if node.type == 'HUE_SAT':
 		exp = exp_hsv(node, exp_list)
@@ -1702,7 +1710,7 @@ def save(context,*, filepath, **kwargs):
 		)
 		handler.setFormatter(formatter)
 		log.addHandler(handler)
-		log.setLevel(logging.DEBUG)
+		log.setLevel(logging.WARNING)
 	try:
 		from os import path
 		basepath, ext = path.splitext(filepath)

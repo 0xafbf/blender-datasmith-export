@@ -1,7 +1,6 @@
 # Changelog
 All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+Features marked with `*` require the UE4 plugin to work.
 
 ## [Unreleased]
 ### Added
@@ -9,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 + Added minimal export option, which skips textures for faster export
 + Added new material nodes:
   - Blackbody
+  - Bright/Contrast*
 
 ### Fixed
 * Improved materials rgb_curves node support
