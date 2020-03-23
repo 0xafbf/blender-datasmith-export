@@ -1254,7 +1254,7 @@ def collect_object(bl_obj,
 			# maybe cache "evaluated curve without modifiers"?
 
 			bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
-			if len(bl_mesh.polygons) > 0:
+			if bl_mesh and len(bl_mesh.polygons) > 0:
 				bl_curve = bl_obj.data
 				bl_curve_name = "%s_%s" % (bl_curve.name, bl_obj.name)
 				bl_curve_name = sanitize_name(bl_curve_name)
@@ -1737,7 +1737,7 @@ def save(context,*, filepath, **kwargs):
 		)
 		handler.setFormatter(formatter)
 		log.addHandler(handler)
-		log.setLevel(logging.INFO)
+		handler.setLevel(logging.DEBUG)
 	try:
 		from os import path
 		basepath, ext = path.splitext(filepath)

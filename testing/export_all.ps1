@@ -1,31 +1,44 @@
 
-# build all files
+param (
+    [switch] $benchmark = $false
+)
 
 Push-Location $PSScriptRoot
 
-Measure-Command -Expression {
+$test_files = (
+    # "archiviz/archiviz.blend",
+    # "blender_splash_fishy_cat/fishy_cat.blend",
+    # "classroom/classroom.blend",
+    # "forest/forest.blend",
+    # "mr_elephant/mr_elephant.blend",
+    # "pabellon_barcelona/pavillon_barcelone_v1_2.blend",
+    "pokedstudio/splash-pokedstudio.blend"
+    # "race_spaceship/race_spaceship.blend",
+    # "stylized_levi/stylized_levi.blend",
+    # "temple/temple.blend",
+    # "the_junk_shop/the_junk_shop.blend",
+    # "tree_creature/tree_creature.blend",
+    # "wanderer/wanderer.blend",
+    # "wasp_bot/wasp_bot.blend"
 
-& blender -b archiviz/archiviz.blend -P test_datasmith_export.py
-& blender -b blender_splash_fishy_cat/fishy_cat.blend -P test_datasmith_export.py
-& blender -b classroom/classroom.blend -P test_datasmith_export.py
-& blender -b forest/forest.blend -P test_datasmith_export.py
-& blender -b mr_elephant/mr_elephant.blend -P test_datasmith_export.py
-& blender -b pabellon_barcelona/pavillon_barcelone_v1_2.blend -P test_datasmith_export.py
-& blender -b pokedstudio/splash-pokedstudio.blend -P test_datasmith_export.py
-& blender -b race_spaceship/race_spaceship.blend -P test_datasmith_export.py
-& blender -b stylized_levi/stylized_levi.blend -P test_datasmith_export.py
-& blender -b temple/temple.blend -P test_datasmith_export.py
-& blender -b the_junk_shop/the_junk_shop.blend -P test_datasmith_export.py
-& blender -b tree_creature/tree_creature.blend -P test_datasmith_export.py
-& blender -b wanderer/wanderer.blend -P test_datasmith_export.py
-& blender -b wasp_bot/wasp_bot.blend -P test_datasmith_export.py
+    # this doesn't export yet
+    # "barbershop/barbershop_interior_cpu.blend"
+)
 
-# last export best time: 4:34
-# make sure to disable profiling to get best time
+$args = @()
 
-# this file does not export succesfully yet
-# & blender -b barbershop/barbershop_interior_cpu.blend -P test_datasmith_export.py
-
+if ($benchmark) {
+    $args += "-benchmark"
 }
+$env:blender_args = $args
+
+Measure-Command -Expression {
+    foreach ($file in $test_files) {
+        blender -b $file -P test_datasmith_export.py -- $env:blender_args
+    }
+}
+
+# best time: 4:18
+
 
 Pop-Location
