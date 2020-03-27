@@ -339,14 +339,14 @@ def add_material_curve2(curve):
 	mat_curve_idx = datasmith_context["material_curves_count"]
 	datasmith_context["material_curves_count"] = mat_curve_idx + 1
 	log.info("writing curve:%s" % mat_curve_idx)
-	# check for curve type, do sampling
-	curve_type = type(curve)
 
 	# write texture from top
 	row_idx = DATASMITH_TEXTURE_SIZE - mat_curve_idx - 1
 	values = material_curves[row_idx]
 	factor = DATASMITH_TEXTURE_SIZE - 1
 
+	# check for curve type, do sampling
+	curve_type = type(curve)
 	if curve_type == bpy.types.ColorRamp:
 		for idx in range(DATASMITH_TEXTURE_SIZE):
 			values[idx] = curve.evaluate(idx/factor)
@@ -357,10 +357,10 @@ def add_material_curve2(curve):
 		position = 0
 		for idx in range(DATASMITH_TEXTURE_SIZE):
 			position = idx/factor
-			values[idx, 0] = curves[0].evaluate(position)
-			values[idx, 1] = curves[1].evaluate(position)
-			values[idx, 2] = curves[2].evaluate(position)
-			values[idx, 3] = curves[3].evaluate(position)
+			values[idx, 0] = curve.evaluate(curves[0], position)
+			values[idx, 1] = curve.evaluate(curves[1], position)
+			values[idx, 2] = curve.evaluate(curves[2], position)
+			values[idx, 3] = curve.evaluate(curves[3], position)
 
 	return mat_curve_idx
 

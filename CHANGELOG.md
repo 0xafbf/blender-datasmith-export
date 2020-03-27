@@ -2,9 +2,9 @@
 All notable changes to this project will be documented in this file.
 Features marked with `*` require the UE4 plugin to work.
 
-## [Unreleased]
+## [0.4.0] 2020-03-26
 ### Added
-+ Added support for curves
++ Added support for exporting curves as geometry
 + Added minimal export option, which skips textures for faster export
 + Added new material nodes:
   - Blackbody
@@ -15,6 +15,7 @@ Features marked with `*` require the UE4 plugin to work.
 ### Fixed
 * Improved materials rgb_curves node support
 * Improved logging output
+* We now support **Blender 2.82**
 
 ## [0.3.0] 2020-03-09
 
