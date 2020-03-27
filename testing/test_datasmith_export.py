@@ -4,14 +4,20 @@
 # run this file with the following command:
 # blender -b sample_file.blend -P test_datasmith_export.py
 
-import bpy.ops
 import bpy
-import os
+import bpy.ops
 import logging
-import time
+import os
 import shutil
-logging_level = logging.INFO # WARNING, INFO, DEBUG
-# logging_level = logging.DEBUG # WARNING, INFO, DEBUG
+import sys
+import time
+
+is_benchmark = "-benchmark" in sys.argv
+
+logging_level = logging.DEBUG # INFO
+
+if is_benchmark:
+	logging_level = logging.WARNING
 
 logging.basicConfig(
 	level=logging_level,
@@ -44,7 +50,12 @@ log.info("Starting automated export")
 custom_args = {}
 custom_args["experimental_tex_mode"] = True
 custom_args["apply_modifiers"] = True
+custom_args["use_logging"] = True
 custom_args["use_profiling"] = False
+# custom_args["minimal_export"] = True
+
+if "-benchmark" in sys.argv:
+	custom_args["use_logging"] = False
 
 
 bpy.ops.export_scene.datasmith(filepath=target_path, **custom_args)
@@ -52,7 +63,11 @@ log.info("Ended automated export")
 
 # right now this is not so useful as the export is non deterministic
 # i guess it is because the usage of dictionaries
-do_file_diff = False
+do_file_diff = True
+
+if "-benchmark" in sys.argv:
+	do_file_diff = False
+
 # todo: if size is less than 2MB
 if backup_path and do_file_diff:
 	log.info("writing diff file")

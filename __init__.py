@@ -3,8 +3,8 @@
 bl_info = {
 	"name": "Unreal Datasmith format",
 	"author": "Andrés Botero",
-	"version": (0, 3, 0),
-	"blender": (2, 81, 0),
+	"version": (0, 4, 0),
+	"blender": (2, 82, 0),
 	"location": "File > Export > Datasmith (.udatasmith)",
 	"description": "Export scene as Datasmith asset",
 	"warning": "",
@@ -43,21 +43,28 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
 
+
 	export_selected: BoolProperty(
-			name="Export selected objects",
+			name="Selected objects only",
 			description="Exports only the selected objects",
 			default=False,
 		)
 	apply_modifiers: BoolProperty(
 			name="Apply modifiers",
 			description="Applies geometry modifiers when exporting. "
-						"(This may break mesh instancing)",
+				"(This may break mesh instancing)",
+			default=True,
+		)
+	minimal_export: BoolProperty(
+			name="Skip meshes and textures",
+			description="Allows for faster exporting, useful if you only changed "
+				"transforms or shaders",
 			default=False,
 		)
 	experimental_tex_mode: BoolProperty(
 			name="Use sRGB support (UE4 4.25)",
 			description="Disables the gamma hack to export masks correctly",
-			default=False,
+			default=True,
 		)
 	use_logging: BoolProperty(
 			name="Enable logging",

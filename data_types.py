@@ -245,87 +245,8 @@ class UDMesh():
 		self.relative_path = path.join(folder_name, self.name + '.udsmesh')
 		abs_path = path.join(basedir, self.relative_path)
 		self.write_to_path(abs_path)
+		self.hash = calc_hash(abs_path)
 
-		import hashlib
-		hash_md5 = hashlib.md5()
-		with open(abs_path, "rb") as f:
-			for chunk in iter(lambda: f.read(4096), b""):
-				hash_md5.update(chunk)
-		self.hash = hash_md5.hexdigest()
-
-
-class UDTexture():
-
-	TEXTURE_MODE_DIFFUSE = "0"
-	TEXTURE_MODE_SPECULAR = "1"
-	TEXTURE_MODE_NORMAL = "2"
-	TEXTURE_MODE_NORMAL_GREEN_INV = "3"
-	TEXTURE_MODE_DISPLACE = "4"
-	TEXTURE_MODE_OTHER = "5"
-	TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
-
-	def __init__(self, name):
-		self.name = name
-		self.image = None
-		self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
-		self.normal_map_flag = False
-		self.hash = ""
-
-	#this just returns the name without the path
-	def abs_path(self):
-		safe_name = sanitize_name(self.name)
-		ext = ".png"
-		if self.image.file_format == 'JPEG':
-			ext = ".jpg"
-		elif self.image.file_format == 'HDR':
-			ext = ".hdr"
-		elif self.image.file_format == 'OPEN_EXR':
-			ext = ".exr"
-		return safe_name + ext
-
-	def node(self, folder_name, use_experimental_texture_mode=False):
-		n = Node('Texture')
-		n['name'] = self.name
-		n['file'] = path.join(folder_name, self.abs_path())
-		n['rgbcurve'] = 0.0
-		n['srgb'] = "1" # this parameter is only read on 4.25 onwards
-
-		if self.image.file_format == 'HDR':
-			self.texture_mode = UDTexture.TEXTURE_MODE_OTHER
-			n['rgbcurve'] = "1.000000"
-		elif self.normal_map_flag:
-			self.texture_mode = UDTexture.TEXTURE_MODE_NORMAL_GREEN_INV
-			n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
-		elif self.image.colorspace_settings.is_data:
-			self.texture_mode = UDTexture.TEXTURE_MODE_SPECULAR
-			n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
-			if not use_experimental_texture_mode:
-				# use this hack if not using experimental mode
-				n['rgbcurve'] = "0.454545"
-		else:
-			self.texture_mode = UDTexture.TEXTURE_MODE_DIFFUSE
-
-
-		n['texturemode'] = self.texture_mode
-		n['texturefilter'] = "3"
-		n.push(Node('Hash', {'value': self.hash}))
-		return n
-
-	def save(self, basedir, folder_name):
-		log.info("writing texture:"+self.name)
-		image_path = path.join(basedir, folder_name, self.abs_path())
-		old_path = self.image.filepath_raw
-		self.image.filepath_raw = image_path
-
-		# fix for invalid images, like one in mr_elephant sample.
-		valid_image = (self.image.channels != 0)
-		if valid_image:
-			self.image.save()
-		if old_path:
-			self.image.filepath_raw = old_path
-
-		if valid_image:
-			self.hash = calc_hash(image_path)
 
 def calc_hash(image_path):
 	hash_md5 = hashlib.md5()

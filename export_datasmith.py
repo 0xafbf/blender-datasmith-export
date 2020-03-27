@@ -5,8 +5,9 @@ import bmesh
 import math
 import os
 import time
+import hashlib
 from os import path
-from .data_types import UDMesh, Node, UDTexture, sanitize_name
+from .data_types import UDMesh, Node, sanitize_name
 from mathutils import Matrix, Vector, Euler
 
 import logging
@@ -154,6 +155,14 @@ def exp_math(node, exp_list):
 	exp = exp_list.push(n)
 	return {"expression": exp, "OutputIndex": 0}
 
+def exp_gamma(node, exp_list):
+	n = Node(op_map['POWER'])
+	exp_0 = get_expression(node.inputs["Color"], exp_list)
+	n.push(Node("0", exp_0))
+	exp_1 = get_expression(node.inputs["Gamma"], exp_list)
+	n.push(Node("1", exp_1))
+	return {"expression": exp_list.push(n)}
+
 op_map_color = {
 # MIX is handled manually
 	'DARKEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Darken",
@@ -205,6 +214,7 @@ def exp_mixrgb(node, exp_list):
 	return exp_list.push(lerp)
 
 op_custom_functions = {
+	"BRIGHTCONTRAST":     "/DatasmithBlenderContent/MaterialFunctions/BrightContrast",
 	"CURVE_RGB":          "/DatasmithBlenderContent/MaterialFunctions/RGBCurveLookup",
 	"FRESNEL":            "/DatasmithBlenderContent/MaterialFunctions/BlenderFresnel",
 	"HUE_SAT":            "/DatasmithBlenderContent/MaterialFunctions/AdjustHSV",
@@ -214,7 +224,18 @@ op_custom_functions = {
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
 }
 
-# TODO: this depends on having the material functions in UE4
+
+
+def exp_generic(node, exp_list, node_type, socket_names):
+	n = Node("FunctionCall", { "Function": op_custom_functions[node_type]})
+	for idx, socket_name in enumerate(socket_names):
+		input_expression = get_expression(node.inputs[socket_name], exp_list)
+		n.push(Node(str(idx), input_expression))
+	return {"expression": exp_list.push(n) }
+
+def exp_bright_contrast(node, exp_list):
+	return exp_generic(node, exp_list, 'BRIGHTCONTRAST', ('Color', 'Bright', 'Contrast'))
+
 def exp_hsv(node, exp_list):
 	n = Node("FunctionCall", { "Function": op_custom_functions["HUE_SAT"]})
 	exp_hue = get_expression(node.inputs['Hue'], exp_list)
@@ -227,8 +248,6 @@ def exp_hsv(node, exp_list):
 	n.push(Node("3", exp_fac))
 	exp_color = get_expression(node.inputs['Color'], exp_list)
 	n.push(Node("4", exp_color))
-	# TODO: test in unreal if I have an expression with two inputs which
-	# one takes place, if it crashes or what
 	return exp_list.push(n)
 
 def exp_invert(node, exp_list):
@@ -289,6 +308,23 @@ def exp_light_path(socket, exp_list):
 	return {"expression": n}
 
 
+def exp_object_info(socket, exp_list):
+	field = socket.name
+	if field == "Location":
+		# TODO: check if we need to transform these to blender space
+		exp = exp_list.push(Node("ObjectPositionWS"))
+	elif field == "Random":
+		exp = exp_list.push(Node("PerInstanceRandom"))
+	elif field == "Object Index":
+		log.warning("Node Object Info>Object Index translated to random as it is used to randomize too")
+		exp = exp_list.push(Node("PerInstanceRandom"))
+	else:
+		log.error("Can't write Material node 'Object Info' field:%s" % field)
+		exp = exp_scalar(0, exp_list)
+
+	return {"expression": exp, "OutputIndex": 0}
+
+
 DATASMITH_TEXTURE_SIZE = 256
 
 def add_material_curve2(curve):
@@ -302,19 +338,18 @@ def add_material_curve2(curve):
 
 	mat_curve_idx = datasmith_context["material_curves_count"]
 	datasmith_context["material_curves_count"] = mat_curve_idx + 1
-
-	# check for curve type, do sampling
-	curve_type = type(curve)
+	log.info("writing curve:%s" % mat_curve_idx)
 
 	# write texture from top
 	row_idx = DATASMITH_TEXTURE_SIZE - mat_curve_idx - 1
 	values = material_curves[row_idx]
 	factor = DATASMITH_TEXTURE_SIZE - 1
 
+	# check for curve type, do sampling
+	curve_type = type(curve)
 	if curve_type == bpy.types.ColorRamp:
 		for idx in range(DATASMITH_TEXTURE_SIZE):
 			values[idx] = curve.evaluate(idx/factor)
-		log.error("color ramp")
 
 	elif curve_type == bpy.types.CurveMapping:
 		curves = curve.curves
@@ -322,13 +357,19 @@ def add_material_curve2(curve):
 		position = 0
 		for idx in range(DATASMITH_TEXTURE_SIZE):
 			position = idx/factor
-			values[idx, 0] = curves[0].evaluate(position)
-			values[idx, 1] = curves[1].evaluate(position)
-			values[idx, 2] = curves[2].evaluate(position)
-			values[idx, 3] = curves[3].evaluate(position)
-		log.error("curve mapping")
+			values[idx, 0] = curve.evaluate(curves[0], position)
+			values[idx, 1] = curve.evaluate(curves[1], position)
+			values[idx, 2] = curve.evaluate(curves[2], position)
+			values[idx, 3] = curve.evaluate(curves[3], position)
 
 	return mat_curve_idx
+
+def exp_blackbody(from_node, exp_list):
+	n = Node("BlackBody")
+	exp_0 = get_expression(from_node.inputs[0], exp_list)
+	n.push(Node("0", exp_0))
+	exp = exp_list.push(n)
+	return {"expression": exp}
 
 def exp_color_ramp(from_node, exp_list):
 	ramp = from_node.color_ramp
@@ -339,7 +380,7 @@ def exp_color_ramp(from_node, exp_list):
 
 	curve_idx = exp_scalar(idx, exp_list)
 	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 	n = Node("Add")
 	n.push(Node("0", {"expression": curve_idx}))
 	n.push(Node("1", {"expression": pixel_offset}))
@@ -370,7 +411,7 @@ def exp_curvergb(from_node, exp_list):
 
 	curve_idx = exp_scalar(idx, exp_list)
 	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/256, exp_list) # curves texture size
+	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 	n = Node("Add")
 	n.push(Node("0", {"expression": curve_idx}))
 	n.push(Node("1", {"expression": pixel_offset}))
@@ -416,8 +457,7 @@ def exp_bump(node, exp_list):
 			name = sanitize_name(image.name)
 
 			# ensure that texture is exported
-			texture = get_or_create_texture(name)
-			texture.image = image
+			get_or_create_texture(name, image)
 
 			image_object = exp_texture_object(name, exp_list)
 			bump_node = Node("FunctionCall", { "Function": op_custom_functions["NORMAL_FROM_HEIGHT"]})
@@ -757,7 +797,8 @@ def get_expression_inner(field, exp_list):
 		return exp_layer_weight(socket, exp_list)
 	if node.type == 'LIGHT_PATH':
 		return exp_light_path(socket, exp_list)
-	# if node.type == 'OBJECT_INFO':
+	if node.type == 'OBJECT_INFO':
+		return exp_object_info(socket, exp_list)
 	# if node.type == 'PARTICLE_INFO':
 
 	if node.type == 'RGB':
@@ -800,11 +841,8 @@ def get_expression_inner(field, exp_list):
 				name = sanitize_name(image.name) # name_full?
 
 				# ensure that texture is exported
-				texture = get_or_create_texture(name)
-				if (get_context() == 'NORMAL'):
-					texture.normal_map_flag = True
-
-				texture.image = image
+				texture_type = get_context() or 'SRGB'
+				get_or_create_texture(name, image, texture_type)
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
@@ -819,12 +857,11 @@ def get_expression_inner(field, exp_list):
 
 		return { "expression": cached_node, "OutputIndex": output_index }
 
-
 	# Add > Color
 	if node.type == 'BRIGHTCONTRAST':
-		log.warn("unimplemented node BRIGHTCONTRAST")
-		return get_expression(node.inputs['Color'], exp_list)
-	# if node.type == 'GAMMA':
+		return exp_bright_contrast(node, exp_list)
+	if node.type == 'GAMMA':
+		return exp_gamma(node, exp_list)
 	if node.type == 'HUE_SAT':
 		exp = exp_hsv(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
@@ -866,7 +903,8 @@ def get_expression_inner(field, exp_list):
 
 	# Add > Converter
 
-	# if node.type == 'BLACKBODY':
+	if node.type == 'BLACKBODY':
+		return exp_blackbody(node, exp_list)
 	if node.type == 'VALTORGB':
 		exp = exp_color_ramp(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
@@ -897,7 +935,7 @@ def get_expression_inner(field, exp_list):
 
 
 def pbr_nodetree_material(material):
-	log.debug("collecting material:"+material.name)
+	log.info("Collecting material: "+material.name)
 	n = Node("UEPbrMaterial")
 	n['name'] = sanitize_name(material.name)
 	exp_list = Node("Expressions")
@@ -994,7 +1032,11 @@ def collect_pbr_material(material):
 
 import numpy as np
 
-def mesh_copy_triangulated(bl_mesh):
+
+
+
+def fill_umesh(umesh, bl_mesh):
+	# create copy to triangulate
 	m = bl_mesh.copy()
 	m.transform(matrix_datasmith)
 	bm = bmesh.new()
@@ -1006,29 +1048,8 @@ def mesh_copy_triangulated(bl_mesh):
 	bm.free()
 	# not sure if this is the best way to read normals
 	m.calc_normals_split()
-	return m
 
-
-
-def collect_mesh(bl_mesh, mesh_name):
-
-	# when using linked libraries, some meshes can have the same name
-	mesh_name = sanitize_name(mesh_name)
-	if bl_mesh.library:
-		#import pdb; pdb.set_trace()
-		lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
-		prefix = lib_path.strip('_')
-		if prefix.endswith('_blend'):
-			prefix = prefix[:-6] + '_'
-		mesh_name = prefix + mesh_name
-
-	umesh = get_or_create_mesh(mesh_name)
-	if len(umesh.vertices) > 0:
-		# mesh already processed
-		return umesh
-	# create copy to triangulate
-
-	m = mesh_copy_triangulated(bl_mesh)
+	#finish inline mesh_copy_triangulate
 
 	for idx, mat in enumerate(bl_mesh.materials):
 		umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
@@ -1180,7 +1201,7 @@ def collect_object(bl_obj,
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
 
-
+		# I think that these should be ordered by how common they are
 		if bl_obj.type == 'EMPTY':
 			pass
 		elif bl_obj.type == 'MESH':
@@ -1191,16 +1212,65 @@ def collect_object(bl_obj,
 				bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
 				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
 
-			if len(bl_mesh.polygons) > 0:
-				n.name = 'ActorMesh'
-				material_list = datasmith_context["materials"]
-				for slot in bl_obj.material_slots:
-					material_list.append(slot.material)
+			if bl_mesh.library:
+				lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
+				prefix = lib_path.strip("_")
+				if prefix.endswith("_blend"):
+					prefix = prefix[:-6] + "_"
+				bl_mesh_name = prefix + bl_mesh_name
 
-				umesh = collect_mesh(bl_mesh, bl_mesh_name)
+
+			bl_mesh_name = sanitize_name(bl_mesh_name)
+			meshes = datasmith_context["meshes"]
+			umesh = None
+			for mesh in meshes:
+				if bl_mesh_name == mesh.name:
+					umesh = mesh
+
+			if umesh == None:
+				if len(bl_mesh.polygons) > 0:
+					umesh = UDMesh(bl_mesh_name)
+					meshes.append(umesh)
+					fill_umesh(umesh, bl_mesh)
+					material_list = datasmith_context["materials"]
+					for slot in bl_obj.material_slots:
+						material_list.append(slot.material)
+
+			if umesh:
+				n.name = 'ActorMesh'
 				n.push(Node('mesh', {'name': umesh.name}))
 
 				for idx, slot in enumerate(bl_obj.material_slots):
+					if slot.link == 'OBJECT':
+						#collect_materials([slot.material], uscene)
+						safe_name = sanitize_name(slot.material.name)
+						n.push(Node('material', {'id':idx, 'name':safe_name}))
+
+		elif bl_obj.type == 'CURVE':
+
+			# as we cannot get geometry before evaluating depsgraph,
+			# we better evaluate first, and check if it has polygons.
+			# this might end with repeated geometry, gotta find solution.
+			# maybe cache "evaluated curve without modifiers"?
+
+			bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
+			if bl_mesh and len(bl_mesh.polygons) > 0:
+				bl_curve = bl_obj.data
+				bl_curve_name = "%s_%s" % (bl_curve.name, bl_obj.name)
+				bl_curve_name = sanitize_name(bl_curve_name)
+
+				umesh = UDMesh(bl_curve_name)
+				meshes = datasmith_context["meshes"]
+				meshes.append(umesh)
+
+				fill_umesh(umesh, bl_mesh)
+				material_list = datasmith_context["materials"]
+
+				n.name = 'ActorMesh'
+				n.push(Node('mesh', {'name': umesh.name}))
+
+				for idx, slot in enumerate(bl_obj.material_slots):
+					material_list.append(slot.material)
 					if slot.link == 'OBJECT':
 						#collect_materials([slot.material], uscene)
 						safe_name = sanitize_name(slot.material.name)
@@ -1225,7 +1295,7 @@ def collect_object(bl_obj,
 			n.push(node_value('FStop', bl_cam.dof.aperture_fstop))
 			n.push(node_value('FocalLength', bl_cam.lens))
 			n.push(Node('Post'))
-
+		# maybe move up as lights are more common?
 		elif bl_obj.type == 'LIGHT':
 
 			obj_mat = obj_mat @ matrix_forward
@@ -1381,8 +1451,7 @@ def collect_environment(world):
 	image = source_node.image
 
 	tex_name = sanitize_name(image.name)
-	texture = get_or_create_texture(tex_name)
-	texture.image = image
+	get_or_create_texture(tex_name, image)
 
 	tex_node = Node("Texture", {
 		"tex": tex_name,
@@ -1438,24 +1507,17 @@ def get_file_header():
 	return n
 
 
-def get_or_create_texture(name):
+# in_type can be SRGB, LINEAR or NORMAL
+def get_or_create_texture(in_name, in_image, in_type='SRGB'):
 	textures = datasmith_context["textures"]
-	for tex in textures:
-		if name == tex.name:
+	for name, tex, _ in textures:
+		if name == in_name:
 			return tex
-	log.debug("collecting texture:%s" % name)
-	new_tex = UDTexture(name)
+	log.debug("collecting texture:%s" % in_name)
+
+	new_tex = (in_name, in_image, in_type)
 	textures.append(new_tex)
 	return new_tex
-
-def get_or_create_mesh(name):
-	meshes = datasmith_context["meshes"]
-	for mesh in meshes:
-		if name == mesh.name:
-			return mesh
-	new_mesh = UDMesh(name)
-	meshes.append(new_mesh)
-	return new_mesh
 
 def get_datasmith_curves_image():
 	log.info("baking curves")
@@ -1476,9 +1538,83 @@ def get_datasmith_curves_image():
 			float_buffer=True
 		)
 		curves_image.colorspace_settings.is_data = True
+		curves_image.file_format = 'OPEN_EXR'
 
 	curves_image.pixels[:] = curve_list.reshape((-1,))
 	return curves_image
+
+
+TEXTURE_MODE_DIFFUSE = "0"
+TEXTURE_MODE_SPECULAR = "1"
+TEXTURE_MODE_NORMAL = "2"
+TEXTURE_MODE_NORMAL_GREEN_INV = "3"
+TEXTURE_MODE_DISPLACE = "4"
+TEXTURE_MODE_OTHER = "5"
+TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
+
+# saves image, and generates node with image description to add to export
+def save_texture(texture, basedir, folder_name, minimal_export = False, experimental_tex_mode=True):
+	name, image, img_type = texture
+
+	log.info("writing texture:"+name)
+
+	ext = ".png"
+	if image.file_format == 'JPEG':
+		ext = ".jpg"
+	elif image.file_format == 'HDR':
+		ext = ".hdr"
+	elif image.file_format == 'OPEN_EXR':
+		ext = ".exr"
+	safe_name = sanitize_name(name) + ext
+
+	image_path = path.join(basedir, folder_name, safe_name)
+	old_path = image.filepath_raw
+	image.filepath_raw = image_path
+
+	# fix for invalid images, like one in mr_elephant sample.
+	valid_image = (image.channels != 0)
+	if valid_image and not minimal_export:
+		image.save()
+	if old_path:
+		image.filepath_raw = old_path
+
+	img_hash = None
+	if valid_image:
+		img_hash = calc_hash(image_path)
+
+	n = Node('Texture')
+	n['name'] = name
+	n['file'] = path.join(folder_name, safe_name)
+	n['rgbcurve'] = 0.0
+	n['srgb'] = "1" # this parameter is only read on 4.25 onwards
+
+	n['texturemode'] = TEXTURE_MODE_DIFFUSE
+	if image.file_format == 'HDR':
+		n['texturemode'] = TEXTURE_MODE_OTHER
+		n['rgbcurve'] = "1.000000"
+	elif img_type == 'NORMAL':
+		n['texturemode'] = TEXTURE_MODE_NORMAL_GREEN_INV
+		n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
+	elif image.colorspace_settings.is_data:
+		n['texturemode'] = TEXTURE_MODE_SPECULAR
+		n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
+		if not experimental_tex_mode:
+			# use this hack if not using experimental mode
+			n['rgbcurve'] = "0.454545"
+
+	n['texturefilter'] = "3"
+	if img_hash:
+		n.push(Node('Hash', {'value': img_hash}))
+	return n
+
+
+def calc_hash(image_path):
+	hash_md5 = hashlib.md5()
+	with open(image_path, "rb") as f:
+		for chunk in iter(lambda: f.read(4096), b""):
+			hash_md5.update(chunk)
+	return hash_md5.hexdigest()
+
 
 datasmith_context = None
 def collect_and_save(context, args, save_path):
@@ -1503,6 +1639,7 @@ def collect_and_save(context, args, save_path):
 
 	selected_only = args["export_selected"]
 	apply_modifiers = args["apply_modifiers"]
+	minimal_export = args["minimal_export"]
 	for obj in root_objects:
 		uobj = collect_object(obj, selected_only=selected_only, apply_modifiers=apply_modifiers)
 		if uobj:
@@ -1510,7 +1647,7 @@ def collect_and_save(context, args, save_path):
 
 	environment = collect_environment(context.scene.world)
 
-	log.info("collecting materials")
+	log.info("Collecting materials")
 	materials = datasmith_context["materials"]
 	unique_materials = []
 	for material in materials:
@@ -1521,8 +1658,7 @@ def collect_and_save(context, args, save_path):
 
 	curves_image = get_datasmith_curves_image()
 	if curves_image:
-		texture = get_or_create_texture("datasmith_curves")
-		texture.image = curves_image
+		get_or_create_texture("datasmith_curves", curves_image)
 
 	log.info("finished collecting, now saving")
 
@@ -1541,8 +1677,12 @@ def collect_and_save(context, args, save_path):
 
 
 	log.info("writing textures")
+
+	tex_nodes = []
+	use_experimental_tex_mode = args["experimental_tex_mode"]
 	for tex in datasmith_context["textures"]:
-		tex.save(basedir, folder_name)
+		tex_node = save_texture(tex, basedir, folder_name, minimal_export, use_experimental_tex_mode)
+		tex_nodes.append(tex_node)
 
 	log.info("building XML tree")
 
@@ -1559,40 +1699,45 @@ def collect_and_save(context, args, save_path):
 	for mat in material_nodes:
 		n.push(mat)
 
-	use_experimental_tex_mode = args["experimental_tex_mode"]
 	print("Using experimental tex mode:%s", use_experimental_tex_mode)
-	for tex in datasmith_context["textures"]:
-		n.push(tex.node(folder_name, use_experimental_tex_mode))
+	for tex in tex_nodes:
+		n.push(tex)
 
 	end_time = time.monotonic()
 	total_time = end_time - start_time
 
-	log.info("preparing data took:%f"%total_time)
+	log.info("generating datasmith data took:%f"%total_time)
 	n.push(
 		Node("Export", {"Duration":total_time})
 	)
 
+	log.info("generating xml")
 	result = n.string_rep(first=True)
 
-	log.info("writing to file")
 	filename = path.join(basedir, file_name + '.udatasmith')
+	log.info("writing to file:%s" % filename)
 	with open(filename, 'w') as f:
 		f.write(result)
-	log.info("export successful")
+	log.info("export finished")
 
 
 
 def save(context,*, filepath, **kwargs):
 
-	use_logging = False
 	handler = None
-	if "use_logging" in kwargs:
-		use_logging = bool(kwargs["use_logging"])
+	use_logging = bool(kwargs["use_logging"])
 
 	if use_logging:
-		handler = logging.FileHandler(filepath + ".log", mode='w')
-		log.addHandler(handler)
+		log_path = filepath + ".log"
+		handler = logging.FileHandler(log_path, mode='w')
 
+		formatter = logging.Formatter(
+			fmt='%(asctime)s.%(msecs)03d %(levelname)-8s %(message)s',
+			datefmt='%Y-%m-%d %H:%M:%S'
+		)
+		handler.setFormatter(formatter)
+		log.addHandler(handler)
+		handler.setLevel(logging.DEBUG)
 	try:
 		from os import path
 		basepath, ext = path.splitext(filepath)
@@ -1608,6 +1753,7 @@ def save(context,*, filepath, **kwargs):
 
 	finally:
 		if use_logging:
+			log.info("Finished logging to path:" + log_path)
 			handler.close()
 			log.removeHandler(handler)
 

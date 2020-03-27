@@ -1,9 +1,21 @@
 # Changelog
 All notable changes to this project will be documented in this file.
+Features marked with `*` require the UE4 plugin to work.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+## [0.4.0] 2020-03-26
+### Added
++ Added support for exporting curves as geometry
++ Added minimal export option, which skips textures for faster export
++ Added new material nodes:
+  - Blackbody
+  - Bright/Contrast*
+  - Object Info
+  - Gamma (Power)
 
-## [Unreleased]
+### Fixed
+* Improved materials rgb_curves node support
+* Improved logging output
+* We now support **Blender 2.82**
 
 ## [0.3.0] 2020-03-09
 
