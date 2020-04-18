@@ -49,5 +49,5 @@ If you want to support the project, consider supporting via [Patreon].
 Please please, [join the project Discord][join_discord] and share your results!
 I want to see what you make and I am open to any feedback you have.
 
-[join_discord]: https://discord.gg/h2GHqMq
+[join_discord]: https://discord.gg/NJt5ADJ
 
