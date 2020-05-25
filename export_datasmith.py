@@ -1234,7 +1234,8 @@ def collect_object(bl_obj,
 					fill_umesh(umesh, bl_mesh)
 					material_list = datasmith_context["materials"]
 					for slot in bl_obj.material_slots:
-						material_list.append(slot.material)
+						if slot.material:
+							material_list.append(slot.material)
 
 			if umesh:
 				n.name = 'ActorMesh'
@@ -1242,9 +1243,10 @@ def collect_object(bl_obj,
 
 				for idx, slot in enumerate(bl_obj.material_slots):
 					if slot.link == 'OBJECT':
-						#collect_materials([slot.material], uscene)
-						safe_name = sanitize_name(slot.material.name)
-						n.push(Node('material', {'id':idx, 'name':safe_name}))
+						if slot.material:
+							#collect_materials([slot.material], uscene)
+							safe_name = sanitize_name(slot.material.name)
+							n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 		elif bl_obj.type == 'CURVE':
 
@@ -1270,11 +1272,12 @@ def collect_object(bl_obj,
 				n.push(Node('mesh', {'name': umesh.name}))
 
 				for idx, slot in enumerate(bl_obj.material_slots):
-					material_list.append(slot.material)
-					if slot.link == 'OBJECT':
-						#collect_materials([slot.material], uscene)
-						safe_name = sanitize_name(slot.material.name)
-						n.push(Node('material', {'id':idx, 'name':safe_name}))
+					if slot.material:
+						material_list.append(slot.material)
+						if slot.link == 'OBJECT':
+							#collect_materials([slot.material], uscene)
+							safe_name = sanitize_name(slot.material.name)
+							n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 		elif bl_obj.type == 'CAMERA':
 
