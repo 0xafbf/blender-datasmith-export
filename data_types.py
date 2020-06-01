@@ -60,9 +60,20 @@ def write_string(io, string):
 	io.write(struct.pack('<I', length))
 	io.write(string_bytes)
 
+
+def is_char_valid(in_char):
+	char_num = ord(in_char)
+	if char_num > 47 and char_num < 58:
+		return True
+	elif char_num > 64 and char_num < 99:
+		return True
+	elif char_num > 96 and char_num < 123:
+		return True
+	return False
+
 def sanitize_name(name):
-	r = name.replace('.', '_')
-	return r.replace(' ', '_')
+	sanitized = "".join(letter if is_char_valid(letter) else '_' for letter in name)
+	return sanitized
 
 def f(x):
 	return '{:6f}'.format(x)

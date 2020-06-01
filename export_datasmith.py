@@ -1153,7 +1153,7 @@ def collect_object(bl_obj,
 
 	n = Node('Actor')
 
-	n['name'] = bl_obj.name
+	n['name'] = sanitize_name(bl_obj.name)
 	if name_override:
 		n['name'] = name_override
 	log.debug("reading object:%s" % bl_obj.name)
@@ -1574,22 +1574,19 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 		ext = ".hdr"
 	elif image.file_format == 'OPEN_EXR':
 		ext = ".exr"
-	safe_name = sanitize_name(name) + ext
 
+	safe_name = sanitize_name(name) + ext
 	image_path = path.join(basedir, folder_name, safe_name)
-	old_path = image.filepath_raw
-	image.filepath_raw = image_path
+	skip_image = minimal_export and not path.exists(image_path)
 
 	# fix for invalid images, like one in mr_elephant sample.
 	valid_image = (image.channels != 0)
-	if valid_image and not minimal_export:
+	if valid_image and not skip_image:
+		old_path = image.filepath_raw
+		image.filepath_raw = image_path
 		image.save()
-	if old_path:
-		image.filepath_raw = old_path
-
-	img_hash = None
-	if valid_image:
-		img_hash = calc_hash(image_path)
+		if old_path:
+			image.filepath_raw = old_path
 
 	n = Node('Texture')
 	n['name'] = name
@@ -1612,7 +1609,8 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 			n['rgbcurve'] = "0.454545"
 
 	n['texturefilter'] = "3"
-	if img_hash:
+	if valid_image:
+		img_hash = calc_hash(image_path)
 		n.push(Node('Hash', {'value': img_hash}))
 	return n
 
@@ -1724,7 +1722,8 @@ def collect_and_save(context, args, save_path):
 	result = n.string_rep(first=True)
 
 	filename = path.join(basedir, file_name + '.udatasmith')
-	log.info("writing to file:%s" % filename)
+	log.info("writing to file: %s" % filename)
+
 	with open(filename, 'w') as f:
 		f.write(result)
 	log.info("export finished")
