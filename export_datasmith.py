@@ -491,9 +491,18 @@ def exp_group(socket, exp_list):
 	# now traverse the inner graph
 	output_name = socket.name
 
-	node_tree_outputs = node.node_tree.nodes['Group Output'] # Should we rely on output nodes having the default name?
-	inner_socket = node_tree_outputs.inputs[output_name]
+	node_tree = node.node_tree
 
+	# search for active output node:
+	output_node = None
+	for node in node_tree.nodes:
+		if type(node) == bpy.types.NodeGroupOutput:
+			if node.is_active_output or output_node is None:
+				output_node = node
+
+	# TODO: handle case when output_node is None
+
+	inner_socket = output_node.inputs[output_name]
 	inner_exp = get_expression(inner_socket, exp_list)
 
 	group_context = previous_context
@@ -1737,6 +1746,7 @@ def save(context,*, filepath, **kwargs):
 		)
 		handler.setFormatter(formatter)
 		log.addHandler(handler)
+		log.setLevel(logging.DEBUG)
 		handler.setLevel(logging.DEBUG)
 	try:
 		from os import path
