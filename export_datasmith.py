@@ -1241,6 +1241,9 @@ def collect_object(bl_obj,
 					umesh = UDMesh(bl_mesh_name)
 					meshes.append(umesh)
 					fill_umesh(umesh, bl_mesh)
+
+					collect_object_metadata(n["name"], "StaticMesh", bl_mesh)
+
 					material_list = datasmith_context["materials"]
 					for slot in bl_obj.material_slots:
 						material_list.append(slot.material)
@@ -1422,6 +1425,7 @@ def collect_object(bl_obj,
 	transform = node_transform(obj_mat)
 	n.push(transform)
 
+	collect_object_metadata(n["name"], "Actor", bl_obj)
 	# just to make children appear last
 
 	if len(child_nodes) > 0:
@@ -1432,6 +1436,36 @@ def collect_object(bl_obj,
 		n.push(children_node)
 
 	return n
+
+def collect_object_metadata(obj_name, obj_type, obj):
+	metadata = None
+	found_metadata = False
+	obj_props = obj.keys()
+	for prop_name in obj_props:
+		if prop_name in {"_RNA_UI", "cycles", "cycles_visibility"}:
+			continue
+		if metadata is None:
+			names = (obj_type, obj_name)
+			metadata = Node("MetaData", {"name": "%s_%s"%names, "reference":"%s.%s"%names } )
+
+		out_value = prop_value = obj[prop_name]
+		prop_type = type(prop_value)
+		out_type = None
+		if prop_type is str:
+			out_type = "String"
+		elif prop_type in {float, int}:
+			out_type = "Float"
+			out_value = f(prop_value)
+		else:
+			# we assume that property is IDPropertyArray
+			out_type = "Vector"
+			out_value = ",".join(f(v) for v in prop_value)
+
+		kvp = Node("KeyValueProperty", {"name": prop_name, "val": out_value, "type": out_type } )
+		metadata.push(kvp)
+		found_metadata = True
+	if metadata is not None:
+		datasmith_context["metadata"].append(metadata)
 
 def node_value(name, value):
 	return Node(name, {'value': '{:6f}'.format(value)})
