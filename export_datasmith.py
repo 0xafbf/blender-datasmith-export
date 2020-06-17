@@ -6,6 +6,7 @@ import math
 import os
 import time
 import hashlib
+import shutil
 from os import path
 from .data_types import UDMesh, Node, sanitize_name
 from mathutils import Matrix, Vector, Euler
@@ -55,16 +56,66 @@ def exp_scalar(value, exp_list):
 
 def exp_texcoord(exp_list, index=0, u_tiling=1.0, v_tiling=1.0):
 	n = Node("TextureCoordinate")
-	n["Index"] = "0"
+	n["Index"] = index
 	n["UTiling"] = u_tiling
 	n["VTiling"] = v_tiling
-	return {"expression": exp_list.push(n)}
+
+	pad = Node("AppendVector")
+	pad.push(Node("0", {"expression": exp_list.push(n) }))
+	zero = exp_scalar(0, exp_list)
+	pad.push(Node("1", {"expression": zero }))
+	return {"expression": exp_list.push(pad) }
+
+def exp_texcoord_node(socket, exp_list):
+	socket_name = socket.name
+	if socket_name == "Generated":
+		n = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions02/UVs/BoundingBoxBased_0-1_UVW"})
+		return { "expression": exp_list.push(n) }
+	# if socket_name == "Normal":
+	if socket_name == "UV":
+		return exp_texcoord(exp_list)
+	if socket_name == "Object":
+		n = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions02/WorldPositionOffset/LocalPosition"})
+		return { "expression": exp_list.push(n) }
+	# if socket_name == "Camera":
+	#	`position from camera in camera space (blue is camera forward, green is camera up`
+	# if socket_name == "Window":
+	#	seems to be viewport coordinates
+	# if socket_name == "Reflection":
+	#	direction of reflection in world coordinates
+	log.warn("Texcoord node doesn't implement %s yet" % socket_name)
+
+def exp_tex_noise(socket, exp_list):
+
+	# default if socket.name == "Fac"
+	function_path = "/DatasmithBlenderContent/MaterialFunctions/Noise"
+	if socket.name == "Color":
+		function_path = "/DatasmithBlenderContent/MaterialFunctions/Noise3"
+	n = Node("FunctionCall", { "Function": function_path})
+	exp_1 = get_expression(socket.node.inputs['Vector'], exp_list)
+	exp_2 = get_expression(socket.node.inputs['Scale'], exp_list)
+	if exp_1:
+		n.push(Node("0", exp_1))
+	n.push(Node("1", exp_2))
+	return { "expression": exp_list.push(n) }
+
+def exp_uvmap(node, exp_list):
+	channel_name = node.uv_map
+	owner = datasmith_context["material_owner"]
+	uv_index = 0
+	m = owner.data
+	if type(m) is bpy.types.Mesh:
+		for idx, uv in enumerate(m.uv_layers):
+			if uv.name == id:
+				uv_index = idx
+	return exp_texcoord(exp_list, uv_index)
 
 # instead of setting coordinates here, use coordinates when creating
 # the texture expression instead
-def exp_texture(path): # , tex_coord_exp):
+def exp_texture(path, name=None): # , tex_coord_exp):
 	n = Node("Texture")
-	n["Name"] = ""
+	if name:
+		n["Name"] = name
 	n["PathName"] = path
 	#n.push(Node("Coordinates", tex_coord_exp))
 	return n
@@ -202,6 +253,8 @@ def exp_blend(exp_0, exp_1, blend_type, exp_list):
 def exp_mixrgb(node, exp_list):
 	exp_1 = get_expression(node.inputs['Color1'], exp_list)
 	exp_2 = get_expression(node.inputs['Color2'], exp_list)
+	# TODO: optimize case fac is disconnected and equals one (or zero)
+	# TODO: add logic for clamp
 
 	exp_result = exp_blend(exp_1, exp_2, node.blend_type, exp_list)
 
@@ -283,6 +336,68 @@ def exp_mapping(node, exp_list):
 
 	return {"expression": exp_list.push(n)}
 
+def exp_new_geometry(socket, exp_list):
+	socket_name = socket.name
+	if socket_name == "Position":
+		blend = Node("WorldPosition")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "Normal":
+		blend = Node("PixelNormalWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "Tangent":
+		blend = Node("VertexTangentWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "True Normal":
+		blend = Node("VertexNormalWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	# if socket_name == "Incoming":
+	# 	this would be cameraposition - worldposition
+	# if socket_name == "Parametric":
+	#	this appears to be per-triangle barycentric coordinates
+	# if socket_name == "Backfacing":
+	#	exactly what it says, I thought UE4 had this
+	if socket_name == "Pointiness":
+		exp = exp_scalar(0, exp_list)
+		return {"expression": exp}
+	# if socket_name == "Random Per Island":
+	log.error("Node NEW_GEOMETRY has unhanded socket:%s" % socket_name)
+
+
+def exp_texture_coordinates(socket, exp_list):
+	socket_name = socket.name
+	if socket_name == "Position":
+		blend = Node("WorldPosition")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "Normal":
+		blend = Node("PixelNormalWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "Tangent":
+		blend = Node("VertexTangentWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	if socket_name == "True Normal":
+		blend = Node("VertexNormalWS")
+		n = exp_list.push(blend)
+		return { "expression": n }
+	# if socket_name == "Incoming":
+	# 	this would be cameraposition - worldposition
+	# if socket_name == "Parametric":
+	#	this appears to be per-triangle barycentric coordinates
+	# if socket_name == "Backfacing":
+	#	exactly what it says, I thought UE4 had this
+	if socket_name == "Pointiness":
+		exp = exp_scalar(0, exp_list)
+		return {"expression": exp}
+	# if socket_name == "Random Per Island":
+	log.error("Node NEW_GEOMETRY has unhanded socket:%s" % socket_name)
+
+
 def exp_layer_weight(socket, exp_list):
 	expr = None
 	if socket.node in reverse_expressions:
@@ -304,6 +419,7 @@ def exp_layer_weight(socket, exp_list):
 	return {"expression": expr, "OutputIndex": 0}
 
 def exp_light_path(socket, exp_list):
+	log.warn("incomplete node implementation: LIGHT_PATH")
 	n = exp_scalar(1, exp_list)
 	return {"expression": n}
 
@@ -395,7 +511,7 @@ def exp_color_ramp(from_node, exp_list):
 	n3.push(Node("1", {"expression": curve_v}))
 	tex_coord = exp_list.push(n3)
 
-	texture_exp = exp_texture("datasmith_curves")
+	texture_exp = exp_texture("datasmith_curves", "datasmith_curves")
 	texture_exp.push(Node("Coordinates", {"expression":tex_coord}))
 
 	return exp_list.push(texture_exp)
@@ -512,6 +628,19 @@ def exp_group(socket, exp_list):
 def exp_group_input(socket, exp_list):
 	outer_expression = group_context[socket.name]
 	return outer_expression
+def exp_attribute(socket, exp_list):
+	exp = exp_list.push(Node("VertexColor"))
+	ret = {"expression": exp, "OutputIndex": 0}
+	# average channels if socket is Fac
+	if socket.name == "Fac":
+		#TODO: check if we should do some colorimetric aware convertion to grayscale
+		n = Node("DotProduct")
+		n.push(Node("0", ret))
+		exp_1 = exp_vector((0.333333, 0.333333, 0.333333), exp_list)
+		n.push(Node("1", {"expression": exp_1}))
+		dot_exp = exp_list.push(n)
+		ret = {"expression": dot_exp}
+	return ret
 
 def exp_fresnel(node, exp_list):
 	n = Node("FunctionCall", { "Function": op_custom_functions["FRESNEL"]})
@@ -792,15 +921,17 @@ def get_expression_inner(field, exp_list):
 
 	# if node.type == 'AMBIENT_OCCLUSION':
 	if node.type == 'ATTRIBUTE':
-		log.warn("incomplete node ATTRIBUTE")
-		exp = exp_list.push(Node("VertexColor"))
-		return {"expression": exp, "OutputIndex": 0}
+		return exp_attribute(socket, exp_list)
+
 	# if node.type == 'BEVEL':
 	# if node.type == 'CAMERA':
 	if node.type == 'FRESNEL':
 		exp = exp_fresnel(node, exp_list)
 		return {"expression": exp}
-	# if node.type == 'NEW_GEOMETRY':
+	if node.type == 'NEW_GEOMETRY':
+		result = exp_new_geometry(socket, exp_list)
+		if result:
+			return result
 	# if node.type == 'HAIR_INFO':
 	if node.type == 'LAYER_WEIGHT': # fresnel and facing, with "blend" (power?) and normal param
 		return exp_layer_weight(socket, exp_list)
@@ -816,12 +947,12 @@ def get_expression_inner(field, exp_list):
 
 	# if node.type == 'TANGENT':
 	if node.type == 'TEX_COORD':
-		if socket.name == 'UV':
-			return exp_texcoord(exp_list)
-		else:
-			log.warn("found node texcoord with name:"+socket.name)
+		exp = exp_texcoord_node(socket, exp_list)
+		if exp:
+			return exp
 
-	# if node.type == 'UVMAP':
+	if node.type == 'UVMAP':
+		return exp_uvmap(node, exp_list)
 	# if node.type == 'VALUE':
 	if node.type == 'VALUE':
 		exp = exp_scalar(node.outputs[0].default_value, exp_list)
@@ -835,6 +966,8 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'TEX_ENVIRONMENT':
 	# if node.type == 'TEX_GRADIENT':
 	# if node.type == 'TEX_IES':
+	if node.type == 'TEX_NOISE':
+		return exp_tex_noise(socket, exp_list)
 	if node.type == 'TEX_IMAGE':
 		cached_node = None
 		if node in reverse_expressions:
@@ -843,6 +976,7 @@ def get_expression_inner(field, exp_list):
 		if not cached_node:
 
 			tex_coord = get_expression(node.inputs['Vector'], exp_list)
+
 
 			name = ""
 			image = node.image
@@ -855,7 +989,10 @@ def get_expression_inner(field, exp_list):
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
-				texture_exp.push(Node("Coordinates", tex_coord))
+				mask = Node("ComponentMask")
+				mask.push(Node("0", tex_coord))
+				mask_expression = { "expression": exp_list.push(mask) }
+				texture_exp.push(Node("Coordinates", mask_expression))
 			cached_node = exp_list.push(texture_exp)
 			reverse_expressions[node] = cached_node
 
@@ -1029,7 +1166,9 @@ def pbr_basic_material(material):
 
 
 
-def collect_pbr_material(material):
+def collect_pbr_material(mat_with_owner):
+	datasmith_context["material_owner"] = mat_with_owner[1]
+	material = mat_with_owner[0]
 	if material is None:
 		log.debug("creating default material")
 		return pbr_default_material()
@@ -1246,7 +1385,7 @@ def collect_object(bl_obj,
 
 					material_list = datasmith_context["materials"]
 					for slot in bl_obj.material_slots:
-						material_list.append(slot.material)
+						material_list.append((slot.material, bl_obj))
 
 			if umesh:
 				n.name = 'ActorMesh'
@@ -1282,7 +1421,7 @@ def collect_object(bl_obj,
 				n.push(Node('mesh', {'name': umesh.name}))
 
 				for idx, slot in enumerate(bl_obj.material_slots):
-					material_list.append(slot.material)
+					material_list.append((slot.material, bl_obj))
 					if slot.link == 'OBJECT':
 						#collect_materials([slot.material], uscene)
 						safe_name = sanitize_name(slot.material.name)
@@ -1419,7 +1558,7 @@ def collect_object(bl_obj,
 			else:
 				log.error("unhandled light probe")
 		else:
-			log.error("unrecognized object type: %s" % bl_obj.type)
+			log.warn("unrecognized object type: %s" % bl_obj.type)
 
 	# set transform at the end, lets the transform be changed depending on its type
 	transform = node_transform(obj_mat)
@@ -1616,11 +1755,18 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 	# fix for invalid images, like one in mr_elephant sample.
 	valid_image = (image.channels != 0)
 	if valid_image and not skip_image:
-		old_path = image.filepath_raw
-		image.filepath_raw = image_path
-		image.save()
-		if old_path:
-			image.filepath_raw = old_path
+		source_path = image.filepath_raw
+
+		if image.packed_file:
+			with open(image_path, "wb") as f:
+				f.write(image.packed_file.data)
+		elif source_path and source_path != image_path:
+			shutil.copyfile(source_path, image_path)
+		else:
+			image.filepath_raw = image_path
+			image.save()
+			if source_path:
+				image.filepath_raw = source_path
 
 	n = Node('Texture')
 	n['name'] = name
@@ -1669,6 +1815,7 @@ def collect_and_save(context, args, save_path):
 		"meshes": [],
 		"materials": [],
 		"material_curves": None,
+		"metadata": [],
 	}
 
 	log.info("collecting objects")
@@ -1692,9 +1839,13 @@ def collect_and_save(context, args, save_path):
 	materials = datasmith_context["materials"]
 	unique_materials = []
 	for material in materials:
-		if material in unique_materials:
-			continue
-		unique_materials.append(material)
+		found = False
+		for mat in unique_materials:
+			if material[0] is mat[0]:
+				found = True
+				break
+		if not found:
+			unique_materials.append(material)
 	material_nodes = [collect_pbr_material(mat) for mat in unique_materials]
 
 	curves_image = get_datasmith_curves_image()
@@ -1743,6 +1894,9 @@ def collect_and_save(context, args, save_path):
 	print("Using experimental tex mode:%s", use_experimental_tex_mode)
 	for tex in tex_nodes:
 		n.push(tex)
+
+	for metadata in datasmith_context["metadata"]:
+		n.push(metadata)
 
 	end_time = time.monotonic()
 	total_time = end_time - start_time
