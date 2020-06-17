@@ -75,7 +75,7 @@ def exp_texcoord_node(socket, exp_list):
 	if socket_name == "UV":
 		return exp_texcoord(exp_list)
 	if socket_name == "Object":
-		n = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions02/WorldPositionOffset/LocalPosition"})
+		n = Node("FunctionCall", { "Function": op_custom_functions["LOCAL_POSITION"]})
 		return { "expression": exp_list.push(n) }
 	# if socket_name == "Camera":
 	#	`position from camera in camera space (blue is camera forward, green is camera up`
@@ -89,15 +89,16 @@ def exp_tex_noise(socket, exp_list):
 
 	# default if socket.name == "Fac"
 	function_path = "/DatasmithBlenderContent/MaterialFunctions/Noise"
+	out_socket = 0
 	if socket.name == "Color":
-		function_path = "/DatasmithBlenderContent/MaterialFunctions/Noise3"
+		out_socket = 1
 	n = Node("FunctionCall", { "Function": function_path})
 	exp_1 = get_expression(socket.node.inputs['Vector'], exp_list)
 	exp_2 = get_expression(socket.node.inputs['Scale'], exp_list)
 	if exp_1:
 		n.push(Node("0", exp_1))
 	n.push(Node("1", exp_2))
-	return { "expression": exp_list.push(n) }
+	return { "expression": exp_list.push(n), "OutputIndex":out_socket }
 
 def exp_uvmap(node, exp_list):
 	channel_name = node.uv_map
@@ -268,10 +269,12 @@ def exp_mixrgb(node, exp_list):
 
 op_custom_functions = {
 	"BRIGHTCONTRAST":     "/DatasmithBlenderContent/MaterialFunctions/BrightContrast",
-	"CURVE_RGB":          "/DatasmithBlenderContent/MaterialFunctions/RGBCurveLookup",
+	"COLOR_RAMP":         "/DatasmithBlenderContent/MaterialFunctions/ColorRamp",
+	"CURVE_RGB":          "/DatasmithBlenderContent/MaterialFunctions/RGBCurveLookup2",
 	"FRESNEL":            "/DatasmithBlenderContent/MaterialFunctions/BlenderFresnel",
 	"HUE_SAT":            "/DatasmithBlenderContent/MaterialFunctions/AdjustHSV",
 	"LAYER_WEIGHT":       "/DatasmithBlenderContent/MaterialFunctions/LayerWeight",
+	"LOCAL_POSITION":     "/DatasmithBlenderContent/MaterialFunctions/BlenderLocalPosition",
 	"MAPPING_POINT2D":    "/DatasmithBlenderContent/MaterialFunctions/MappingPoint2D",
 	"MAPPING_TEX2D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture2D",
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
@@ -495,26 +498,41 @@ def exp_color_ramp(from_node, exp_list):
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
 	curve_idx = exp_scalar(idx, exp_list)
-	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
-	n = Node("Add")
-	n.push(Node("0", {"expression": curve_idx}))
-	n.push(Node("1", {"expression": pixel_offset}))
-	curve_y = exp_list.push(n)
-	n2 = Node("Multiply")
-	n2.push(Node("0", {"expression": curve_y}))
-	n2.push(Node("1", {"expression": vertical_res}))
-	curve_v = exp_list.push(n2)
+	CHEAP = False # TODO FIXME
+	if CHEAP:
+		pixel_offset = exp_scalar(0.5, exp_list)
+		vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
+		n = Node("Add")
+		n.push(Node("0", {"expression": curve_idx}))
+		n.push(Node("1", {"expression": pixel_offset}))
+		curve_y = exp_list.push(n)
+		n2 = Node("Multiply")
+		n2.push(Node("0", {"expression": curve_y}))
+		n2.push(Node("1", {"expression": vertical_res}))
+		curve_v = exp_list.push(n2)
 
-	n3 = Node("AppendVector")
-	n3.push(Node("0", level))
-	n3.push(Node("1", {"expression": curve_v}))
-	tex_coord = exp_list.push(n3)
+		n3 = Node("AppendVector")
+		n3.push(Node("0", level))
+		n3.push(Node("1", {"expression": curve_v}))
+		tex_coord = exp_list.push(n3)
 
-	texture_exp = exp_texture("datasmith_curves", "datasmith_curves")
-	texture_exp.push(Node("Coordinates", {"expression":tex_coord}))
+		texture_exp = exp_texture("datasmith_curves", "datasmith_curves")
+		texture_exp.push(Node("Coordinates", {"expression":tex_coord}))
 
-	return exp_list.push(texture_exp)
+		return exp_list.push(texture_exp)
+
+	else:
+		vertical_res = exp_scalar(DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
+		texture = exp_texture_object("datasmith_curves", exp_list)
+
+		lookup = Node("FunctionCall", { "Function": op_custom_functions["COLOR_RAMP"]})
+		lookup.push(Node("0", level))
+		lookup.push(Node("1", {"expression": curve_idx } ))
+		lookup.push(Node("2", {"expression": vertical_res } ))
+		lookup.push(Node("3", {"expression": texture } ))
+		result = exp_list.push(lookup)
+
+		return result
 
 def exp_curvergb(from_node, exp_list):
 	mapping = from_node.mapping
@@ -526,23 +544,15 @@ def exp_curvergb(from_node, exp_list):
 	color = get_expression(from_node.inputs['Color'], exp_list)
 
 	curve_idx = exp_scalar(idx, exp_list)
-	pixel_offset = exp_scalar(0.5, exp_list)
-	vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
-	n = Node("Add")
-	n.push(Node("0", {"expression": curve_idx}))
-	n.push(Node("1", {"expression": pixel_offset}))
-	curve_y = exp_list.push(n)
-	n2 = Node("Multiply")
-	n2.push(Node("0", {"expression": curve_y}))
-	n2.push(Node("1", {"expression": vertical_res}))
-	curve_v = exp_list.push(n2)
+	vertical_res = exp_scalar(DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 
 	texture = exp_texture_object("datasmith_curves", exp_list)
 
 	lookup = Node("FunctionCall", { "Function": op_custom_functions["CURVE_RGB"]})
 	lookup.push(Node("0", color))
-	lookup.push(Node("1", {"expression": curve_v}))
-	lookup.push(Node("2", {"expression": texture}))
+	lookup.push(Node("1", {"expression": curve_idx}))
+	lookup.push(Node("2", {"expression": vertical_res}))
+	lookup.push(Node("3", {"expression": texture}))
 	blend_exp = exp_list.push(lookup)
 
 
