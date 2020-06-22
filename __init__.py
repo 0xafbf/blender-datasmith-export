@@ -43,7 +43,6 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	filter_glob: StringProperty(default="*.udatasmith", options={'HIDDEN'})
 
 
-
 	export_selected: BoolProperty(
 			name="Selected objects only",
 			description="Exports only the selected objects",
@@ -65,6 +64,11 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			name="Use sRGB support (UE4 4.25)",
 			description="Disables the gamma hack to export masks correctly",
 			default=True,
+		)
+	prefer_custom_nodes: BoolProperty(
+			name="Prefer custom nodes",
+			description="Exports simpler node setups for some nodes, requires having the UE4 plugin",
+			default=False,
 		)
 	use_logging: BoolProperty(
 			name="Enable logging",

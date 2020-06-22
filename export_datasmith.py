@@ -121,6 +121,61 @@ def exp_texture(path, name=None): # , tex_coord_exp):
 	#n.push(Node("Coordinates", tex_coord_exp))
 	return n
 
+def exp_rgb_to_bw(socket, exp_list):
+	input_exp = get_expression(socket.node.inputs[0], exp_list)
+	n = Node("DotProduct")
+	n.push(Node("0", input_exp))
+	exp_1 = exp_vector( (0.2126, 0.7152, 0.0722), exp_list )
+	n.push( Node( "1", { "expression": exp_1 } ) )
+	dot_exp = exp_list.push(n)
+	return { "expression": dot_exp }
+
+def exp_make_vec3(socket, exp_list):
+	node = socket.node
+	output = Node("FunctionCall", { "Function": "/Engine/Functions/Engine_MaterialFunctions02/Utility/MakeFloat3" })
+	output.push(Node("0", get_expression(node.inputs[0], exp_list)))
+	output.push(Node("1", get_expression(node.inputs[1], exp_list)))
+	output.push(Node("2", get_expression(node.inputs[2], exp_list)))
+	return { "expression": exp_list.push(output) }
+
+def exp_make_hsv(socket, exp_list):
+	vec3_input = exp_make_vec3(socket, exp_list)
+	output = Node("FunctionCall",  { "Function": "/DatasmithBlenderContent/MaterialFunctions/HSV_To_RGB" })
+	output.push(Node("0", vec3_input))
+	return { "expression": exp_list.push(output) }
+
+def exp_break_vec3(socket, exp_list):
+	expression_idx = -1
+	if socket.node in cached_nodes:
+		expression_idx = cached_nodes[socket.node]
+	else:
+		output = Node("FunctionCall",  { "Function": "/Engine/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat3Components" })
+		output.push(Node("0", get_expression(socket.node.inputs[0], exp_list)))
+		expression_idx = exp_list.push(output)
+		cached_nodes[socket.node] = expression_idx
+
+	output_index = socket.node.outputs.find(socket.name) # could be faster by comparing to constants instead?
+	return { "expression": expression_idx, "OutputIndex": output_index }
+
+def exp_break_hsv(socket, exp_list):
+
+	expression_idx = -1
+	if socket.node in cached_nodes:
+		expression_idx = cached_nodes[socket.node]
+	else:
+		input = Node("FunctionCall",  { "Function": "/DatasmithBlenderContent/MaterialFunctions/RGB_To_HSV" })
+		hsv_expression_idx = input.push(Node("0", get_expression(socket.node.inputs[0], exp_list)))
+
+		output = Node("FunctionCall",  { "Function": "/Engine/Functions/Engine_MaterialFunctions02/Utility/BreakOutFloat3Components" })
+		output.push(Node("0", { "expression": hsv_expression_idx }))
+		expression_idx = exp_list.push(output)
+		cached_nodes[socket.node] = expression_idx
+
+	output_index = socket.node.outputs.find(socket.name) # could be faster by comparing to constants instead?
+	return { "expression": expression_idx, "OutputIndex": output_index }
+
+
+
 # these map 1:1 with UE4 nodes:
 op_map = {
 	'ADD': "Add",
@@ -207,6 +262,42 @@ def exp_math(node, exp_list):
 	exp = exp_list.push(n)
 	return {"expression": exp, "OutputIndex": 0}
 
+VECT_MATH_SAME_AS_SCALAR = {
+	'ADD',
+	'SUBTRACT',
+	'MULTIPLY',
+	'DIVIDE',
+
+	'ABSOLUTE',
+	'MINIMUM',
+	'MAXIMUM',
+	'FLOOR',
+	'CEIL',
+	'MODULO',
+	'SINE',
+	'COSINE',
+	'TANGENT',
+}
+	# TODO: implement
+	# 'FRACTION' NOT FRACT
+	# 'WRAP' # check NODE_VECTOR_MATH_WRAP
+	# 'SNAP'
+
+    # 'CROSS_PRODUCT'
+    # 'PROJECT'
+    # 'REFLECT'
+    # 'DOT_PRODUCT'
+
+    # 'DISTANCE'
+    # 'LENGTH'
+    # 'SCALE'
+    # 'NORMALIZE'
+
+
+def exp_vect_math(node, exp_list):
+	if node.operation in VECT_MATH_SAME_AS_SCALAR:
+		return exp_math(node, exp_list)
+
 def exp_gamma(node, exp_list):
 	n = Node(op_map['POWER'])
 	exp_0 = get_expression(node.inputs["Color"], exp_list)
@@ -275,8 +366,11 @@ op_custom_functions = {
 	"HUE_SAT":            "/DatasmithBlenderContent/MaterialFunctions/AdjustHSV",
 	"LAYER_WEIGHT":       "/DatasmithBlenderContent/MaterialFunctions/LayerWeight",
 	"LOCAL_POSITION":     "/DatasmithBlenderContent/MaterialFunctions/BlenderLocalPosition",
-	"MAPPING_POINT2D":    "/DatasmithBlenderContent/MaterialFunctions/MappingPoint2D",
-	"MAPPING_TEX2D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture2D",
+	"MAPPING_POINT2D":    "/DatasmithBlenderContent/MaterialFunctions/MappingPoint2D_2",
+	"MAPPING_POINT3D":    "/DatasmithBlenderContent/MaterialFunctions/MappingPoint3D",
+	"MAPPING_TEX2D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture2D_2",
+	"MAPPING_TEX3D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture3D",
+	"MAPPING_NORMAL":      "/DatasmithBlenderContent/MaterialFunctions/MappingNormal",
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
 }
 
@@ -322,10 +416,25 @@ def exp_invert(node, exp_list):
 
 def exp_mapping(node, exp_list):
 	# TODO: cases for 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
-	n = None
-	mapping_type = 'MAPPING_POINT2D'
-	if node.vector_type == 'TEXTURE':
-		mapping_type = 'MAPPING_TEX2D'
+
+	if node.vector_type == 'NORMAL':
+		mapping_type = 'MAPPING_NORMAL'
+	else:
+		node_input_rot = node.inputs["Rotation"]
+		default_rot = node_input_rot.default_value
+		uses_3d_rot = default_rot.x != 0 or default_rot.y != 0
+		use_2d_node = not node_input_rot.links and not uses_3d_rot
+		if node.vector_type == 'POINT' or node.vector_type == 'VECTOR':
+			if use_2d_node:
+				mapping_type = 'MAPPING_POINT2D'
+			else:
+				mapping_type = 'MAPPING_POINT3D'
+		elif node.vector_type == 'TEXTURE':
+			if use_2d_node:
+				mapping_type = 'MAPPING_TEX2D'
+			else:
+				mapping_type = 'MAPPING_TEX3D'
+
 	n = Node("FunctionCall", { "Function": op_custom_functions[mapping_type]})
 
 	input_vector = get_expression(node.inputs['Vector'], exp_list)
@@ -498,8 +607,8 @@ def exp_color_ramp(from_node, exp_list):
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
 	curve_idx = exp_scalar(idx, exp_list)
-	CHEAP = False # TODO FIXME
-	if CHEAP:
+	prefer_custom_nodes = datasmith_context["prefer_custom_nodes"]
+	if not prefer_custom_nodes:
 		pixel_offset = exp_scalar(0.5, exp_list)
 		vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 		n = Node("Add")
@@ -963,7 +1072,6 @@ def get_expression_inner(field, exp_list):
 
 	if node.type == 'UVMAP':
 		return exp_uvmap(node, exp_list)
-	# if node.type == 'VALUE':
 	if node.type == 'VALUE':
 		exp = exp_scalar(node.outputs[0].default_value, exp_list)
 		return {"expression": exp}
@@ -1059,26 +1167,35 @@ def get_expression_inner(field, exp_list):
 
 	# Add > Converter
 
+	# if node.type == 'WAVELENGTH':
 	if node.type == 'BLACKBODY':
 		return exp_blackbody(node, exp_list)
 	if node.type == 'VALTORGB':
 		exp = exp_color_ramp(node, exp_list)
 		return {"expression": exp, "OutputIndex": 0}
 
-	# if node.type == 'COMBHSV':
-	# if node.type == 'COMBRGB':
-	# if node.type == 'COMBXYZ':
-	if node.type == 'MATH':
-		exp = exp_math(node, exp_list)
-		return exp
+	if node.type == 'COMBRGB':
+		return exp_make_vec3(socket, exp_list)
+	if node.type == 'COMBXYZ':
+		return exp_make_vec3(socket, exp_list)
+	if node.type == 'COMBHSV':
+		return exp_make_hsv(socket, exp_list)
 
-	# if node.type == 'RGBTOBW':
-	# if node.type == 'SEPHSV':
-	# if node.type == 'SEPRGB':
-	# if node.type == 'SEPXYZ':
+	if node.type == 'SEPRGB':
+		return exp_break_vec3(socket, exp_list)
+	if node.type == 'SEPXYZ':
+		return exp_break_vec3(socket, exp_list)
+	if node.type == 'SEPHSV':
+		return exp_break_hsv(socket, exp_list)
+
+	if node.type == 'RGBTOBW':
+		return exp_rgb_to_bw(socket, exp_list)
+	if node.type == 'MATH':
+		return exp_math(node, exp_list)
+	if node.type == 'VECT_MATH':
+		return exp_vect_math(node, exp_list)
+
 	# if node.type == 'SHADERTORGB':
-	# if node.type == 'VECT_MATH':
-	# if node.type == 'WAVELENGTH':
 
 	# Others:
 
@@ -1175,9 +1292,11 @@ def pbr_basic_material(material):
 	return n
 
 
-
+cached_nodes = {}
 def collect_pbr_material(mat_with_owner):
 	datasmith_context["material_owner"] = mat_with_owner[1]
+	global cached_nodes
+	cached_nodes = {}
 	material = mat_with_owner[0]
 	if material is None:
 		log.debug("creating default material")
@@ -1826,6 +1945,7 @@ def collect_and_save(context, args, save_path):
 		"materials": [],
 		"material_curves": None,
 		"metadata": [],
+		"prefer_custom_nodes": args["prefer_custom_nodes"],
 	}
 
 	log.info("collecting objects")
