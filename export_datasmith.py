@@ -246,16 +246,16 @@ def exp_function_call(path, inputs, exp_list, force_default=False):
 
 def exp_math(node, exp_list):
 	op = node.operation
-	n = None
+	exp = None
 	if op in MATH_TWO_INPUTS:
-		return exp_generic(
+		exp = exp_generic(
 			name= MATH_TWO_INPUTS[op],
 			inputs= node.inputs[:2],
 			exp_list=exp_list,
 			force_default=True,
 		)
 	elif op in MATH_ONE_INPUT:
-		return exp_generic(
+		exp = exp_generic(
 			name= MATH_ONE_INPUT[op],
 			inputs= node.inputs[:1],
 			exp_list=exp_list,
@@ -263,13 +263,14 @@ def exp_math(node, exp_list):
 		)
 	elif op in MATH_CUSTOM_FUNCTIONS:
 		size, path = MATH_CUSTOM_FUNCTIONS[op]
-		return exp_function_call(
+		exp = exp_function_call(
 			path,
 			inputs= node.inputs[:size],
 			exp_list=exp_list,
 		)
 	elif op in MATH_CUSTOM_IMPL:
 		in_0 = get_expression(node.inputs[0], exp_list)
+		n = None
 		if op == 'RADIANS':
 			n = Node("Multiply")
 			n.push(Node("0", in_0))
@@ -309,12 +310,13 @@ def exp_math(node, exp_list):
 				n.push(Node("2", one)) # A > B
 				n.push(Node("3", zero)) # A == B
 				n.push(Node("4", zero)) # A < B
+		assert n
+		exp = { "expression": exp_list.push(n) }
 
 
-	assert n, "unrecognized math operation: %s" % op
+	assert exp, "unrecognized math operation: %s" % op
 
-	exp = { "expression": exp_list.push(n) }
-	if node.use_clamp:
+	if getattr(node, "use_clamp", False):
 		clamp = Node("Saturate")
 		clamp.push(Node("0", exp))
 		exp = { "expression": exp_list.push(clamp) }
