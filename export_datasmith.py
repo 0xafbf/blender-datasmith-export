@@ -175,9 +175,23 @@ def exp_break_hsv(socket, exp_list):
 	return { "expression": expression_idx, "OutputIndex": output_index }
 
 
+MATH_CUSTOM_FUNCTIONS = {
+	'INVERSE_SQRT': (1, "/DatasmithBlenderContent/MaterialFunctions/MathInvSqrt"),
+	'EXPONENT':     (1, "/DatasmithBlenderContent/MaterialFunctions/MathExp"),
+	'SINH':         (1, "/DatasmithBlenderContent/MaterialFunctions/MathSinH"),
+	'COSH':         (1, "/DatasmithBlenderContent/MaterialFunctions/MathCosH"),
+	'TANH':         (1, "/DatasmithBlenderContent/MaterialFunctions/MathTanH"),
+	'MULTIPLY_ADD': (3, "/DatasmithBlenderContent/MaterialFunctions/MathMultiplyAdd"),
+	'COMPARE':      (3, "/DatasmithBlenderContent/MaterialFunctions/MathCompare"),
+	'SMOOTH_MIN':   (3, "/DatasmithBlenderContent/MaterialFunctions/MathSmoothMin"),
+	'SMOOTH_MAX':   (3, "/DatasmithBlenderContent/MaterialFunctions/MathSmoothMax"),
+	'WRAP':         (3, "/DatasmithBlenderContent/MaterialFunctions/MathWrap"),
+	'SNAP':         (2, "/DatasmithBlenderContent/MaterialFunctions/MathSnap"),
+	'PINGPONG':    (2, "/DatasmithBlenderContent/MaterialFunctions/MathPingPong"),
+}
 
 # these map 1:1 with UE4 nodes:
-op_map = {
+MATH_TWO_INPUTS = {
 	'ADD': "Add",
 	'SUBTRACT': "Subtract",
 	'MULTIPLY': "Multiply",
@@ -190,7 +204,7 @@ op_map = {
 }
 
 # these use only one input in UE4
-op_map_one_input = {
+MATH_ONE_INPUT = {
 	'SQRT': "SquareRoot",
 	'ABSOLUTE': "Abs",
 	'ROUND': "Round",
@@ -203,65 +217,110 @@ op_map_one_input = {
 	'ARCSINE': "Arcsine",
 	'ARCCOSINE': "Arccosine",
 	'ARCTANGENT': "Arctangent",
+	'SIGN': "Sign",
+	'TRUNC': "Truncate",
 }
 
 # these require specific implementations:
-op_map_custom = {
+MATH_CUSTOM_IMPL = {
 	'LOGARITHM', # ue4 only has log2 and log10
 	'LESS_THAN', # use UE4 If node
 	'GREATER_THAN', # use UE4 If node
+	'RADIANS',
+	'DEGREES',
 }
+
+def exp_generic(name, inputs, exp_list, force_default=False):
+	n = Node(name)
+	for idx, input in enumerate(inputs):
+		input_exp = get_expression(input, exp_list, force_default)
+		n.push(Node(str(idx), input_exp))
+	return { "expression": exp_list.push(n) }
+
+def exp_function_call(path, inputs, exp_list, force_default=False):
+	n = Node("FunctionCall", {"Function": path})
+	for idx, input in enumerate(inputs):
+		input_exp = get_expression(input, exp_list, force_default)
+		n.push(Node(str(idx), input_exp))
+	return { "expression": exp_list.push(n) }
 
 def exp_math(node, exp_list):
 	op = node.operation
 	n = None
-	if op in op_map:
-		n = Node(op_map[op])
-		exp_0 = get_expression(node.inputs[0], exp_list)
-		n.push(Node("0", exp_0))
-		exp_1 = get_expression(node.inputs[1], exp_list)
-		n.push(Node("1", exp_1))
-	elif op in op_map_one_input:
-		n = Node(op_map_one_input[op])
-		exp = get_expression(node.inputs[0], exp_list)
-		n.push(Node("0", exp))
-	elif op in op_map_custom:
-		# all of these use two inputs
+	if op in MATH_TWO_INPUTS:
+		return exp_generic(
+			name= MATH_TWO_INPUTS[op],
+			inputs= node.inputs[:2],
+			exp_list=exp_list,
+			force_default=True,
+		)
+	elif op in MATH_ONE_INPUT:
+		return exp_generic(
+			name= MATH_ONE_INPUT[op],
+			inputs= node.inputs[:1],
+			exp_list=exp_list,
+			force_default=True,
+		)
+	elif op in MATH_CUSTOM_FUNCTIONS:
+		size, path = MATH_CUSTOM_FUNCTIONS[op]
+		return exp_function_call(
+			path,
+			inputs= node.inputs[:size],
+			exp_list=exp_list,
+		)
+	elif op in MATH_CUSTOM_IMPL:
 		in_0 = get_expression(node.inputs[0], exp_list)
-		in_1 = get_expression(node.inputs[1], exp_list)
-		if op == 'LOGARITHM': # take two logarithms and divide
-			log0 = Node("Logarithm2")
-			log0.push(Node("0", in_0))
-			exp_0 = exp_list.push(log0)
-			log1 = Node("Logarithm2")
-			log1.push(Node("0", in_1))
-			exp_1 = exp_list.push(log1)
-			n = Node("Divide")
-			n.push(Node("0", {"expression": exp_0}))
-			n.push(Node("1", {"expression": exp_1}))
-		elif op == 'LESS_THAN':
-			n = Node("If")
-			one = {"expression": exp_scalar(1.0, exp_list)}
-			zero = {"expression": exp_scalar(0.0, exp_list)}
-			n.push(Node("0", in_0)) # A
-			n.push(Node("1", in_1)) # B
-			n.push(Node("2", zero)) # A > B
-			n.push(Node("3", one)) # A == B
-			n.push(Node("4", one)) # A < B
-		elif op == 'GREATER_THAN':
-			n = Node("If")
-			one = {"expression": exp_scalar(1.0, exp_list)}
-			zero = {"expression": exp_scalar(0.0, exp_list)}
-			n.push(Node("0", in_0)) # A
-			n.push(Node("1", in_1)) # B
-			n.push(Node("2", one)) # A > B
-			n.push(Node("3", zero)) # A == B
-			n.push(Node("4", zero)) # A < B
+		if op == 'RADIANS':
+			n = Node("Multiply")
+			n.push(Node("0", in_0))
+			n.push(Node("1", { "expression": exp_scalar(math.tau / 360, exp_list)}))
+		elif op == 'DEGREES':
+			n = Node("Multiply")
+			n.push(Node("0", in_0))
+			n.push(Node("1", { "expression": exp_scalar(360 / math.tau, exp_list)}))
+		else:
+			# these use two inputs
+			in_1 = get_expression(node.inputs[1], exp_list)
+			if op == 'LOGARITHM': # take two logarithms and divide
+				log0 = Node("Logarithm2")
+				log0.push(Node("0", in_0))
+				exp_0 = exp_list.push(log0)
+				log1 = Node("Logarithm2")
+				log1.push(Node("0", in_1))
+				exp_1 = exp_list.push(log1)
+				n = Node("Divide")
+				n.push(Node("0", {"expression": exp_0}))
+				n.push(Node("1", {"expression": exp_1}))
+			elif op == 'LESS_THAN':
+				n = Node("If")
+				one = {"expression": exp_scalar(1.0, exp_list)}
+				zero = {"expression": exp_scalar(0.0, exp_list)}
+				n.push(Node("0", in_0)) # A
+				n.push(Node("1", in_1)) # B
+				n.push(Node("2", zero)) # A > B
+				n.push(Node("3", one)) # A == B
+				n.push(Node("4", one)) # A < B
+			elif op == 'GREATER_THAN':
+				n = Node("If")
+				one = {"expression": exp_scalar(1.0, exp_list)}
+				zero = {"expression": exp_scalar(0.0, exp_list)}
+				n.push(Node("0", in_0)) # A
+				n.push(Node("1", in_1)) # B
+				n.push(Node("2", one)) # A > B
+				n.push(Node("3", zero)) # A == B
+				n.push(Node("4", zero)) # A < B
+
 
 	assert n, "unrecognized math operation: %s" % op
-	exp = exp_list.push(n)
-	return {"expression": exp, "OutputIndex": 0}
 
+	exp = { "expression": exp_list.push(n) }
+	if node.use_clamp:
+		clamp = Node("Saturate")
+		clamp.push(Node("0", exp))
+		exp = { "expression": exp_list.push(clamp) }
+	return exp
+
+# these nodes should only be built-ins (green nodes)
 VECT_MATH_SAME_AS_SCALAR = {
 	'ADD',
 	'SUBTRACT',
@@ -278,28 +337,62 @@ VECT_MATH_SAME_AS_SCALAR = {
 	'COSINE',
 	'TANGENT',
 }
-	# TODO: implement
-	# 'FRACTION' NOT FRACT
-	# 'WRAP' # check NODE_VECTOR_MATH_WRAP
-	# 'SNAP'
 
-    # 'CROSS_PRODUCT'
-    # 'PROJECT'
-    # 'REFLECT'
-    # 'DOT_PRODUCT'
 
-    # 'DISTANCE'
-    # 'LENGTH'
-    # 'SCALE'
-    # 'NORMALIZE'
+VECT_MATH_NODES = {
+	'CROSS_PRODUCT': (2, "CrossProduct"),
+	'DOT_PRODUCT':   (2, "DotProduct"),
+	'DISTANCE':      (2, "Distance"),
+	'NORMALIZE':     (1, "Normalize"),
+	'FRACTION':      (1, "Frac"),
+}
+VECT_MATH_FUNCTIONS = { # tuples are (input_count, path)
 
+	'WRAP': (3, "/DatasmithBlenderContent/MaterialFunctions/VectWrap"),
+	'SNAP': (2, "/DatasmithBlenderContent/MaterialFunctions/VectSnap"),
+	'PROJECT': (2, "/DatasmithBlenderContent/MaterialFunctions/VectProject"),
+	'REFLECT': (2, "/DatasmithBlenderContent/MaterialFunctions/VectReflect"),
+}
 
 def exp_vect_math(node, exp_list):
-	if node.operation in VECT_MATH_SAME_AS_SCALAR:
+	node_op = node.operation
+	if node_op in VECT_MATH_SAME_AS_SCALAR:
 		return exp_math(node, exp_list)
+	elif node_op in VECT_MATH_NODES:
+		size, name = VECT_MATH_NODES[node_op]
+		return exp_generic(
+			name=name,
+			inputs=node.inputs[:size],
+			exp_list=exp_list,
+			force_default=True,
+		)
+	elif node_op in VECT_MATH_FUNCTIONS:
+		size, path = VECT_MATH_FUNCTIONS[node_op]
+		return exp_function_call(
+			path,
+			inputs= node.inputs[:size],
+			exp_list=exp_list,
+			force_default=True,
+		)
+	elif node_op == 'SCALE':
+		return exp_generic(
+			name= "Multiply",
+			inputs= (node.inputs[0], node.inputs[3]),
+			exp_list=exp_list,
+			force_default=True,
+		)
+	elif node_op == 'LENGTH':
+		n = Node("Distance")
+		n.push(Node("0", get_expression(node.inputs[0], exp_list) ))
+		n.push(Node("1", { "expression": exp_vector((0,0,0), exp_list) } ))
+		return { "expression": exp_list.push(n) }
+
+	log.error("VECT_MATH node operation:%s not found" % node_op)
+
+# TODO: make test cases for all math nodes
 
 def exp_gamma(node, exp_list):
-	n = Node(op_map['POWER'])
+	n = Node(MATH_TWO_INPUTS['POWER'])
 	exp_0 = get_expression(node.inputs["Color"], exp_list)
 	n.push(Node("0", exp_0))
 	exp_1 = get_expression(node.inputs["Gamma"], exp_list)
@@ -309,7 +402,7 @@ def exp_gamma(node, exp_list):
 op_map_color = {
 # MIX is handled manually
 	'DARKEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Darken",
-# MULTIPLY is handled in op_map
+# MULTIPLY is handled in MATH_TWO_INPUTS
 	'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorBurn",
 	# TODO: check for blender implementation of burn, it could mean this:
 	#'BURN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearBurn",
@@ -317,12 +410,12 @@ op_map_color = {
 	'SCREEN': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Screen",
 	'DODGE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_ColorDodge",
 	'OVERLAY': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Overlay",
-# ADD is handled in op_map
+# ADD is handled in MATH_TWO_INPUTS
 	'SOFT_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_SoftLight",
 	'LINEAR_LIGHT': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_LinearLight",
 	'DIFFERENCE': "/Engine/Functions/Engine_MaterialFunctions03/Blends/Blend_Difference",
-# SUBTRACT is handled in op_map
-# DIVIDE is handled in op_map
+# SUBTRACT is handled in MATH_TWO_INPUTS
+# DIVIDE is handled in MATH_TWO_INPUTS
 	'HUE': "/DatasmithBlenderContent/MaterialFunctions/Blend_Hue",
 	'SATURATION': "/DatasmithBlenderContent/MaterialFunctions/Blend_Saturation",
 	'COLOR': "/DatasmithBlenderContent/MaterialFunctions/Blend_Color",
@@ -334,7 +427,7 @@ def exp_blend(exp_0, exp_1, blend_type, exp_list):
 		return exp_1
 	n = None
 	if blend_type in {'ADD', 'SUBTRACT', 'MULTIPLY', 'DIVIDE'}:
-		n = Node(op_map[blend_type])
+		n = Node(MATH_TWO_INPUTS[blend_type])
 	else:
 		n = Node("FunctionCall", { "Function": op_map_color[blend_type]})
 	assert n
@@ -376,7 +469,7 @@ op_custom_functions = {
 
 
 
-def exp_generic(node, exp_list, node_type, socket_names):
+def exp_generic_function(node, exp_list, node_type, socket_names):
 	n = Node("FunctionCall", { "Function": op_custom_functions[node_type]})
 	for idx, socket_name in enumerate(socket_names):
 		input_expression = get_expression(node.inputs[socket_name], exp_list)
@@ -384,7 +477,7 @@ def exp_generic(node, exp_list, node_type, socket_names):
 	return {"expression": exp_list.push(n) }
 
 def exp_bright_contrast(node, exp_list):
-	return exp_generic(node, exp_list, 'BRIGHTCONTRAST', ('Color', 'Bright', 'Contrast'))
+	return exp_generic_function(node, exp_list, 'BRIGHTCONTRAST', ('Color', 'Bright', 'Contrast'))
 
 def exp_hsv(node, exp_list):
 	n = Node("FunctionCall", { "Function": op_custom_functions["HUE_SAT"]})
@@ -415,8 +508,6 @@ def exp_invert(node, exp_list):
 	return exp_list.push(blend)
 
 def exp_mapping(node, exp_list):
-	# TODO: cases for 'TEXTURE', 'POINT', 'VECTOR', 'NORMAL'
-
 	if node.vector_type == 'NORMAL':
 		mapping_type = 'MAPPING_NORMAL'
 	else:
@@ -781,7 +872,7 @@ def get_context():
 
 
 expression_log_prefix = ""
-def get_expression(field, exp_list):
+def get_expression(field, exp_list, force_default=False):
 	# this may return none for fields without default value
 	# most of the time blender doesn't have default value for vector
 	# node inputs, but it does for scalars and colors
@@ -798,10 +889,8 @@ def get_expression(field, exp_list):
 			exp = exp_color(field.default_value, exp_list)
 			return {"expression": exp, "OutputIndex": 0}
 		elif field.type == 'VECTOR':
-			if type(field.default_value) is Vector:
-				exp = exp_vector(field.default_value, exp_list)
-				return {"expression": exp, "OutputIndex": 0}
-			if type(field.default_value) is Euler:
+			use_vector_default = force_default or type(field.default_value) in {Vector, Euler}
+			if use_vector_default:
 				exp = exp_vector(field.default_value, exp_list)
 				return {"expression": exp, "OutputIndex": 0}
 		elif field.type == 'SHADER':
