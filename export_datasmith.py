@@ -540,6 +540,23 @@ def exp_mapping(node, exp_list):
 	n.push(Node("3", input_scale))
 
 	return {"expression": exp_list.push(n)}
+def exp_normal_map(socket, exp_list):
+	node_input = socket.node.inputs['Color']
+	# hack: is it safe to assume that everything under here is normal?
+	# maybe not, because it could be masks to mix normals
+	# most certainly, these wouldn't be colors (so should be non-srgb)
+	push_context("NORMAL")
+	return_exp = get_expression(node_input, exp_list)
+	pop_context()
+
+	strength_input = socket.node.inputs["Strength"]
+	if strength_input.links or strength_input.default_value != 1.0:
+		node_strength = Node("FunctionCall", {"Function": "/DatasmithBlenderContent/MaterialFunctions/NormalStrength"})
+		node_strength.push(Node("0", return_exp))
+		node_strength.push(Node("1", get_expression(strength_input, exp_list)))
+		return_exp = { "expression": exp_list.push(node_strength) }
+	return return_exp
+
 
 def exp_new_geometry(socket, exp_list):
 	socket_name = socket.name
@@ -1245,13 +1262,7 @@ def get_expression_inner(field, exp_list):
 		return exp_mapping(node, exp_list)
 	# if node.type == 'NORMAL':
 	if node.type == 'NORMAL_MAP':
-		node_input = node.inputs['Color']
-		# hack: is it safe to assume that everything under here is normal?
-		# maybe not, because it could be masks to mix normals
-		push_context("NORMAL")
-		return_exp = get_expression(node_input, exp_list)
-		pop_context()
-		return return_exp
+		return exp_normal_map(socket, exp_list)
 	# if node.type == 'CURVE_VEC':
 	# if node.type == 'VECTOR_DISPLACEMENT':
 	# if node.type == 'VECT_TRANSFORM':
