@@ -1,6 +1,7 @@
 # Copyright Andrés Botero 2019
 
 import bpy
+import idprop
 import bmesh
 import math
 import os
@@ -1826,15 +1827,21 @@ def collect_object_metadata(obj_name, obj_type, obj):
 		elif prop_type in {float, int}:
 			out_type = "Float"
 			out_value = f(prop_value)
-		else:
-			# we assume that property is IDPropertyArray
+		elif prop_type is idprop.types.IDPropertyArray:
 			out_type = "Vector"
 			out_value = ",".join(f(v) for v in prop_value)
+		elif prop_type is idprop.types.IDPropertyGroup:
+			if len(out_value) == 0:
+				continue
+			out_type = "String"
+			out_value = str(prop_value.to_dict())
+		else:
+			log.error("got metadata with type:%s" % prop_type)
 
 		kvp = Node("KeyValueProperty", {"name": prop_name, "val": out_value, "type": out_type } )
 		metadata.push(kvp)
 		found_metadata = True
-	if metadata is not None:
+	if found_metadata:
 		datasmith_context["metadata"].append(metadata)
 
 def node_value(name, value):
@@ -1986,7 +1993,7 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 	# fix for invalid images, like one in mr_elephant sample.
 	valid_image = (image.channels != 0)
 	if valid_image and not skip_image:
-		source_path = image.filepath_raw
+		source_path = image.filepath_from_user()
 
 		if image.packed_file:
 			with open(image_path, "wb") as f:
