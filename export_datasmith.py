@@ -1515,12 +1515,14 @@ def node_transform(mat):
 	n['sz'] = f(scale.z)
 	return n
 
-def collect_object(bl_obj,
+def collect_object(
+	bl_obj,
 	name_override=None,
 	instance_matrix=None,
 	selected_only=False,
-	apply_modifiers=False
-	):
+	apply_modifiers=False,
+	export_animations=False,
+):
 
 	n = Node('Actor')
 
@@ -1531,11 +1533,7 @@ def collect_object(bl_obj,
 
 	n['layer'] = bl_obj.users_collection[0].name_full
 
-	mat_basis = bl_obj.matrix_world
-	if instance_matrix:
-		mat_basis = instance_matrix
 
-	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
 	child_nodes = []
 
@@ -1548,19 +1546,25 @@ def collect_object(bl_obj,
 	# if this is selected, or if there is any child that needs this
 	# object to be placed in hierarchy
 	# TODO: collections don't work this way, investigate (export chair from classroom)
-	write_all_data = True
+	export_empty_because_unselected = False
 	if selected_only:
-		# by default write minimal data unless selected
-		write_all_data = False
-		if bl_obj in bpy.context.selected_objects:
-			write_all_data = True
-		elif not child_nodes:
-			# if we don't have children, just skip
-			return None
+		is_selected = bl_obj in bpy.context.selected_objects
+		if selected_only and not is_selected:
+			if len(child_nodes) == 0:
+				# We skip this object as it is not selected, and has no children selected
+				return None
+			else:
+				# we aren't selected, but we have selected children, so create minimal object
+				export_empty_because_unselected = True
 
-	if write_all_data:
+	# from here, we're absolutely sure that this object should be exported
+
+	obj_mat = collect_object_transform(bl_obj, instance_matrix)
+	transform = node_transform(obj_mat)
+
+	# if an object is not selected but is in hierarchy, we don't write data for it
+	if not export_empty_because_unselected:
 		# TODO: use instanced static meshes
-
 		depsgraph = datasmith_context["depsgraph"]
 
 		if bl_obj.is_instancer:
@@ -1576,11 +1580,36 @@ def collect_object(bl_obj,
 						name_override=dup_name,
 						selected_only=False, # if is instancer, maybe all child want to be instanced
 						apply_modifiers=False, # if is instancer, applying modifiers may end in a lot of meshes
+						export_animations=False, # TODO: test how would animation work mixed with instancing
 						)
 					child_nodes.append(new_obj)
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
 
+		collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph)
+
+	# todo: maybe make some assumptions? like if obj is probe or reflection, don't add to animated objects list
+
+	if export_animations:
+		datasmith_context["anim_objects"].append((bl_obj, n["name"], obj_mat))
+
+
+	collect_object_metadata(n["name"], "Actor", bl_obj)
+	# just to make children appear last
+	n.push(transform)
+
+	if len(child_nodes) > 0:
+		children_node = Node("children");
+		for child in child_nodes:
+			if child:
+				children_node.push(child)
+		n.push(children_node)
+
+
+	return n
+
+
+def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 		# I think that these should be ordered by how common they are
 		if bl_obj.type == 'EMPTY':
 			pass
@@ -1661,7 +1690,6 @@ def collect_object(bl_obj,
 
 		elif bl_obj.type == 'CAMERA':
 
-			obj_mat = obj_mat @ matrix_forward
 			bl_cam = bl_obj.data
 			n.name = 'Camera'
 
@@ -1681,7 +1709,6 @@ def collect_object(bl_obj,
 		# maybe move up as lights are more common?
 		elif bl_obj.type == 'LIGHT':
 
-			obj_mat = obj_mat @ matrix_forward
 			bl_light = bl_obj.data
 			n.name = 'Light'
 
@@ -1751,15 +1778,8 @@ def collect_object(bl_obj,
 			bl_probe = bl_obj.data
 			if bl_probe.type == 'PLANAR':
 				n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderPlanarReflection"
-				size = bl_probe.influence_distance * 2.5 # 100 / 40 as the UE4 mirror size is 40m wide
-				obj_mat = obj_mat @ Matrix.Scale(size, 4)
-				# todo: check what does the falloff do
 
 			elif bl_probe.type == 'CUBEMAP':
-				size = bl_probe.influence_distance * 100
-				falloff = bl_probe.falloff # this value is 0..1
-
-				# we need to have into account current object scale
 				## we could also try using min/max if it makes a difference
 				_, _, obj_scale = obj_mat.decompose()
 				avg_scale = (obj_scale.x + obj_scale.y + obj_scale.z) * 0.333333
@@ -1768,13 +1788,13 @@ def collect_object(bl_obj,
 					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderBoxReflection"
 
 
-					transition_distance = falloff * size * avg_scale
+					falloff = bl_probe.falloff # this value is 0..1
+					transition_distance = falloff * avg_scale
 					prop = Node("KeyValueProperty", {"name": "TransitionDistance", "type":"Float", "val": "%.6f"%transition_distance})
 					n.push(prop)
-					obj_mat = obj_mat @ Matrix.Scale(size, 4)
-				else: # if bl_probe.type == 'ELIPSOID'
+				else: # if bl_probe.influence_type == 'ELIPSOID'
 					n["PathName"] = "/DatasmithBlenderContent/Blueprints/BP_BlenderSphereReflection"
-					probe_radius = size * avg_scale
+					probe_radius = bl_probe.influence_distance * 100 * avg_scale
 					radius = Node("KeyValueProperty", {"name": "Radius", "type":"Float", "val": "%.6f"%probe_radius})
 					n.push(radius)
 			elif bl_probe.type == 'GRID':
@@ -1786,27 +1806,34 @@ def collect_object(bl_obj,
 				# outward_influence would be 1.0 + influence_distance / size maybe?
 				# obj_mat = obj_mat @ Matrix.Scale(outward_influence, 4)
 
-
 			else:
 				log.error("unhandled light probe")
+		elif bl_obj.type == 'ARMATURE':
+			pass
 		else:
-			log.warn("unrecognized object type: %s" % bl_obj.type)
+			log.error("unrecognized object type: %s" % bl_obj.type)
 
-	# set transform at the end, lets the transform be changed depending on its type
-	transform = node_transform(obj_mat)
-	n.push(transform)
 
-	collect_object_metadata(n["name"], "Actor", bl_obj)
-	# just to make children appear last
 
-	if len(child_nodes) > 0:
-		children_node = Node("children");
-		for child in child_nodes:
-			if child:
-				children_node.push(child)
-		n.push(children_node)
+def collect_object_transform(bl_obj, instance_matrix=None):
+	mat_basis = instance_matrix or bl_obj.matrix_world
+	obj_mat = matrix_datasmith @ mat_basis @ matrix_datasmith.inverted()
 
-	return n
+	if bl_obj.type in 'CAMERA' or bl_obj.type == 'LIGHT':
+		obj_mat = obj_mat @ matrix_forward
+	elif bl_obj.type == 'LIGHT_PROBE':
+		bl_probe = bl_obj.data
+		if bl_probe.type == 'PLANAR':
+			size = bl_probe.influence_distance * 2.5 # 100 / 40 as the UE4 mirror size is 40m wide
+			obj_mat = obj_mat @ Matrix.Scale(size, 4)
+		elif bl_probe.type == 'CUBEMAP':
+			if bl_probe.influence_type == 'BOX':
+				size = bl_probe.influence_distance * 100
+				obj_mat = obj_mat @ Matrix.Scale(size, 4)
+
+	obj_mat.freeze() # TODO: check if this is needed
+	return obj_mat
+
 
 def collect_object_metadata(obj_name, obj_type, obj):
 	metadata = None
@@ -2049,6 +2076,7 @@ def collect_and_save(context, args, save_path):
 	global datasmith_context
 	datasmith_context = {
 		"objects": [],
+		"anim_objects": [],
 		"textures": [],
 		"meshes": [],
 		"materials": [],
@@ -2067,10 +2095,122 @@ def collect_and_save(context, args, save_path):
 	selected_only = args["export_selected"]
 	apply_modifiers = args["apply_modifiers"]
 	minimal_export = args["minimal_export"]
+	export_animations = args["export_animations"]
+
+	if export_animations:
+		frame_at_export_time = context.scene.frame_current
+		frame_start = context.scene.frame_start
+		frame_end = context.scene.frame_end
+
+
 	for obj in root_objects:
-		uobj = collect_object(obj, selected_only=selected_only, apply_modifiers=apply_modifiers)
+		uobj = collect_object(obj,
+			selected_only=selected_only,
+			apply_modifiers=apply_modifiers,
+			export_animations=export_animations,
+		)
 		if uobj:
 			objects.append(uobj)
+
+	log.info("collecting animations")
+	anims = []
+	if export_animations:
+
+		# TODO: found a bit late about this: we need to test and profile
+		# https://docs.blender.org/api/current/bpy_extras.anim_utils.html
+
+		anim_objs = datasmith_context["anim_objects"]
+
+		num_frames = frame_end - frame_start + 1
+		num_objects = len(anim_objs)
+		object_timelines = [[Matrix() for frame in range(num_frames)] for obj in range(num_objects)]
+		object_animates = [False for num in range(num_objects)]
+		# collect phase?
+
+		for arr_idx, frame_idx in enumerate(range(frame_start, frame_end+1)):
+
+			context.scene.frame_set(frame_idx)
+
+			for obj_idx, obj in enumerate(anim_objs):
+
+				obj_mat = collect_object_transform(obj[0])
+				object_timelines[obj_idx][arr_idx] = obj_mat
+
+				if arr_idx == 0:
+					continue
+
+				if not object_animates[obj_idx]:
+					changed = obj_mat != object_timelines[obj_idx][arr_idx -1]
+					if changed:
+						object_animates[obj_idx] = True
+
+		anims_strings = []
+		# write phase:
+		to_deg = 360 / math.tau
+		rot_fix = np.array((to_deg, -to_deg, to_deg))
+		for idx, timeline in enumerate(object_timelines):
+			if not object_animates[idx]:
+				continue
+			log.error(f"writing obj:{idx}")
+
+			timeline_repr = ['''{
+				"actor": "''', anim_objs[idx][1], '",'
+			]
+
+			translations = np.empty((num_frames, 4), dtype=np.float32)
+			rotations = np.empty((num_frames, 4), dtype=np.float32)
+			scales = np.empty((num_frames, 4), dtype=np.float32)
+			translations[:, 0] = np.arange(frame_start, frame_end+1)
+			rotations[:, 0] = np.arange(frame_start, frame_end+1)
+			scales[:, 0] = np.arange(frame_start, frame_end+1)
+
+			for frame_idx, frame_mat in enumerate(timeline):
+				loc, rot, scale = frame_mat.decompose()
+				tx_slice = (frame_idx, slice(1,4))
+				translations[frame_idx, 1:4] = loc
+				rotations[frame_idx, 1:4] = rot_fix * rot.to_euler('XYZ')
+				scales[frame_idx, 1:4] = scale
+
+			trans_expression = ",".join(
+				'{"id":%d,"x":%f,"y":%f,"z":%f}'% tuple(v)
+				for v in translations
+			)
+			timeline_repr.extend(('"trans":[', trans_expression, '],'))
+
+			rot_expression = ",".join(
+				'{"id":%d,"x":%f,"y":%f,"z":%f}'% tuple(v)
+				for v in rotations
+			)
+			timeline_repr.extend(('"rot":[', rot_expression, '],'))
+
+			scale_expression = ",".join(
+				'{"id":%d,"x":%f,"y":%f,"z":%f}'% tuple(v)
+				for v in scales
+			)
+			timeline_repr.extend(('"scl":[', scale_expression, '],'))
+
+			timeline_repr.append('"type":"transform"}')
+			result = "".join(timeline_repr)
+			anims_strings.append(result)
+
+		if anims_strings:
+			output = ["""
+			{
+		"version": "0.1",
+		"fps": """,
+			str(context.scene.render.fps),
+		""",
+		"animations": [""",
+				",".join(anims_strings),
+				"]}"
+			]
+
+			output_text = "".join(output)
+			anims.append(output_text)
+
+		# cleanup
+		context.scene.frame_set(frame_at_export_time)
+
 
 	environment = collect_environment(context.scene.world)
 
@@ -2101,6 +2241,22 @@ def collect_and_save(context, args, save_path):
 	except FileExistsError as e:
 		pass
 
+	log.info("writing anims")
+	anim_nodes = []
+	for anim in anims:
+
+		filename = path.join(basedir, folder_name, "anim_new.json")
+		log.info("writing to file:%s" % filename)
+		with open(filename, 'w') as f:
+			f.write(output_text)
+
+		anim = Node("LevelSequence", {"name": "anim_new"})
+		anim.push(Node("File", {"path": f"{folder_name}/anim_new.json"}))
+		anim_nodes.append(anim)
+
+
+
+
 	log.info("writing meshes")
 	for mesh in datasmith_context["meshes"]:
 		mesh.save(basedir, folder_name)
@@ -2118,6 +2274,10 @@ def collect_and_save(context, args, save_path):
 	log.info("building XML tree")
 
 	n = get_file_header()
+
+	for anim in anim_nodes:
+		n.push(anim)
+
 	for obj in objects:
 		n.push(obj)
 
@@ -2157,7 +2317,7 @@ def collect_and_save(context, args, save_path):
 
 
 
-def save(context,*, filepath, **kwargs):
+def save(context, *, filepath, **kwargs):
 
 	handler = None
 	use_logging = bool(kwargs["use_logging"])

@@ -48,6 +48,11 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			description="Exports only the selected objects",
 			default=False,
 		)
+	export_animations: BoolProperty(
+			name="Export animations",
+			description="Export object animations (transforms only)",
+			default=False,
+		)
 	apply_modifiers: BoolProperty(
 			name="Apply modifiers",
 			description="Applies geometry modifiers when exporting. "
