@@ -50,6 +50,7 @@ log.info("Starting automated export")
 custom_args = {}
 custom_args["experimental_tex_mode"] = True
 custom_args["apply_modifiers"] = True
+custom_args["prefer_custom_nodes"] = True
 custom_args["use_logging"] = True
 custom_args["use_profiling"] = False
 # custom_args["minimal_export"] = True

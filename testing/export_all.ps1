@@ -6,23 +6,21 @@ param (
 Push-Location $PSScriptRoot
 
 $test_files = (
-    # "archiviz/archiviz.blend",
-    # "blender_splash_fishy_cat/fishy_cat.blend",
-    # "classroom/classroom.blend",
-    # "forest/forest.blend",
-    # "mr_elephant/mr_elephant.blend",
-    # "pabellon_barcelona/pavillon_barcelone_v1_2.blend",
-    "pokedstudio/splash-pokedstudio.blend"
-    # "race_spaceship/race_spaceship.blend",
-    # "stylized_levi/stylized_levi.blend",
-    # "temple/temple.blend",
-    # "the_junk_shop/the_junk_shop.blend",
-    # "tree_creature/tree_creature.blend",
-    # "wanderer/wanderer.blend",
-    # "wasp_bot/wasp_bot.blend"
-
-    # this doesn't export yet
-    # "barbershop/barbershop_interior_cpu.blend"
+    "archiviz/archiviz.blend",
+    "barbershop/barbershop_interior_cpu.blend",
+    "blender_splash_fishy_cat/fishy_cat.blend",
+    "classroom/classroom.blend",
+    "forest/forest.blend",
+    "mr_elephant/mr_elephant.blend",
+    "pabellon_barcelona/pavillon_barcelone_v1_2.blend",
+    "pokedstudio/splash-pokedstudio.blend",
+    "race_spaceship/race_spaceship.blend",
+    "stylized_levi/stylized_levi.blend",
+    "temple/temple.blend",
+    "the_junk_shop/the_junk_shop.blend",
+    "tree_creature/tree_creature.blend",
+    "wanderer/wanderer.blend",
+    "wasp_bot/wasp_bot.blend"
 )
 
 $args = @()
@@ -38,7 +36,8 @@ Measure-Command -Expression {
     }
 }
 
-# best time: 4:18
+# best time: 4:18 without barbershop
+# best time: 6:05 while streaming
 
 
 Pop-Location
