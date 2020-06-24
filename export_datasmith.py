@@ -664,7 +664,7 @@ def exp_object_info(socket, exp_list):
 	return {"expression": exp, "OutputIndex": 0}
 
 
-DATASMITH_TEXTURE_SIZE = 256
+DATASMITH_TEXTURE_SIZE = 1024
 
 def add_material_curve2(curve):
 
