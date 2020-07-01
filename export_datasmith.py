@@ -50,7 +50,7 @@ def exp_color(value, exp_list, name=""):
 
 def exp_scalar(value, exp_list):
 	n = Node("Scalar", {
-		"Name": "",
+		# "Name": "",
 		"constant": "%f"%value
 		})
 	return exp_list.push(n)
@@ -89,7 +89,7 @@ def exp_texcoord_node(socket, exp_list):
 def exp_tex_noise(socket, exp_list):
 
 	# default if socket.name == "Fac"
-	function_path = "/DatasmithBlenderContent/MaterialFunctions/Noise"
+	function_path = "/DatasmithBlenderContent/MaterialFunctions/TexNoise"
 	out_socket = 0
 	if socket.name == "Color":
 		out_socket = 1
@@ -100,6 +100,25 @@ def exp_tex_noise(socket, exp_list):
 		n.push(Node("0", exp_1))
 	n.push(Node("1", exp_2))
 	return { "expression": exp_list.push(n), "OutputIndex":out_socket }
+
+
+def exp_tex_checker(socket, exp_list):
+	if socket.node in cached_nodes:
+		exp = { "expression": cached_nodes[socket.node] }
+	else:
+		exp = exp_function_call(
+			"/DatasmithBlenderContent/MaterialFunctions/TexChecker",
+			exp_list=exp_list,
+			inputs=socket.node.inputs,
+			force_default=True,
+		)
+		cached_nodes[socket.node] = exp["expression"]
+
+	# could be faster by comparing to constants instead?
+	exp["OutputIndex"] = socket.node.outputs.find(socket.name)
+
+	return exp
+
 
 def exp_uvmap(node, exp_list):
 	channel_name = node.uv_map
@@ -468,6 +487,7 @@ op_custom_functions = {
 	"MAPPING_TEX3D":      "/DatasmithBlenderContent/MaterialFunctions/MappingTexture3D",
 	"MAPPING_NORMAL":      "/DatasmithBlenderContent/MaterialFunctions/MappingNormal",
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
+	"WORLD_POSITION":     "/DatasmithBlenderContent/MaterialFunctions/BlenderWorldPosition",
 }
 
 
@@ -562,7 +582,7 @@ def exp_normal_map(socket, exp_list):
 def exp_new_geometry(socket, exp_list):
 	socket_name = socket.name
 	if socket_name == "Position":
-		blend = Node("WorldPosition")
+		blend = Node("FunctionCall", { "Function": op_custom_functions["WORLD_POSITION"]})
 		n = exp_list.push(blend)
 		return { "expression": n }
 	if socket_name == "Normal":
@@ -593,7 +613,7 @@ def exp_new_geometry(socket, exp_list):
 def exp_texture_coordinates(socket, exp_list):
 	socket_name = socket.name
 	if socket_name == "Position":
-		blend = Node("WorldPosition")
+		blend = Node("FunctionCall", { "Function": op_custom_functions["WORLD_POSITION"]})
 		n = exp_list.push(blend)
 		return { "expression": n }
 	if socket_name == "Normal":
@@ -825,14 +845,18 @@ def exp_group(socket, exp_list):
 	node = socket.node
 	global group_context
 	global reverse_expressions
+	global cached_nodes
 	new_context = {}
+	new_cached_nodes = {}
 	for input in node.inputs:
 		new_context[input.name] = get_expression(input, exp_list)
 
 	previous_reverse = reverse_expressions
 	reverse_expressions = {}
 	previous_context = group_context
+	previous_cached_nodes = cached_nodes
 	group_context = new_context
+	cached_nodes = new_cached_nodes
 
 	# now traverse the inner graph
 	output_name = socket.name
@@ -852,6 +876,7 @@ def exp_group(socket, exp_list):
 	inner_exp = get_expression(inner_socket, exp_list)
 
 	group_context = previous_context
+	cached_nodes = previous_cached_nodes
 	reverse_expressions = previous_reverse
 	return inner_exp
 
@@ -944,7 +969,7 @@ def get_expression(field, exp_list, force_default=False):
 	socket = field.links[0].from_socket
 	reverse_expressions[socket] = return_exp
 
-	log.debug(expression_log_prefix + "end field:"+field_path)
+	log.debug("%send field:%s = %s" % (expression_log_prefix, field_path, return_exp))
 
 	return return_exp
 
@@ -981,6 +1006,7 @@ def get_expression_inner(field, exp_list):
 			"BaseColor": get_expression(node.inputs['Base Color'], exp_list),
 			"Metallic": get_expression(node.inputs['Metallic'], exp_list),
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
+			"Specular": get_expression(node.inputs['Specular'], exp_list),
 		}
 
 		# only add opacity if transmission != 0
@@ -1044,6 +1070,7 @@ def get_expression_inner(field, exp_list):
 		log.warn("BSDF_GLASS incomplete implementation")
 		bsdf = {
 			"BaseColor": get_expression(node.inputs['Color'], exp_list),
+			"Metallic": { "expression": exp_scalar(1, exp_list) },
 			"Roughness": get_expression(node.inputs['Roughness'], exp_list),
 			"Refraction": get_expression(node.inputs['IOR'], exp_list),
 			"Opacity": {"expression": exp_scalar(0.5, exp_list)},
@@ -1189,7 +1216,8 @@ def get_expression_inner(field, exp_list):
 
 	# Add > Texture
 	# if node.type == 'TEX_BRICK':
-	# if node.type == 'TEX_CHECKER':
+	if node.type == 'TEX_CHECKER':
+		return exp_tex_checker(socket, exp_list)
 	# if node.type == 'TEX_ENVIRONMENT':
 	# if node.type == 'TEX_GRADIENT':
 	# if node.type == 'TEX_IES':
@@ -1201,12 +1229,15 @@ def get_expression_inner(field, exp_list):
 			cached_node = reverse_expressions[node]
 
 		if not cached_node:
+			image = node.image
+			if not image:
+				return { "expression": exp_scalar(0, exp_list) }
+
 
 			tex_coord = get_expression(node.inputs['Vector'], exp_list)
 
 
 			name = ""
-			image = node.image
 			if image:
 				name = sanitize_name(image.name) # name_full?
 
@@ -1469,9 +1500,19 @@ def fill_umesh(umesh, bl_mesh):
 
 	uvs = []
 	num_uvs = min(8, len(m.uv_layers))
+	active_uv = 0
 	for idx in range(num_uvs):
+		if m.uv_layers[idx].active_render:
+			active_uv = idx
+	for idx in range(num_uvs):
+		uv_idx = idx # swap active_render UV with channel 0
+		if uv_idx == 0:
+			uv_idx = active_uv
+		elif uv_idx == active_uv:
+			uv_idx = 0
+
 		uv_channel = np.empty(num_loops * 2, np.float32)
-		uv_data = m.uv_layers[idx].data
+		uv_data = m.uv_layers[uv_idx].data
 		uv_data.foreach_get("uv", uv_channel)
 		uv_channel = uv_channel.reshape((num_loops, 2))
 		uv_channel[:,1] = 1 - uv_channel[:,1]
@@ -1824,8 +1865,7 @@ def collect_object_transform(bl_obj, instance_matrix=None):
 	elif bl_obj.type == 'LIGHT_PROBE':
 		bl_probe = bl_obj.data
 		if bl_probe.type == 'PLANAR':
-			size = bl_probe.influence_distance * 2.5 # 100 / 40 as the UE4 mirror size is 40m wide
-			obj_mat = obj_mat @ Matrix.Scale(size, 4)
+			obj_mat = obj_mat @ Matrix.Scale(0.05, 4)
 		elif bl_probe.type == 'CUBEMAP':
 			if bl_probe.influence_type == 'BOX':
 				size = bl_probe.influence_distance * 100
