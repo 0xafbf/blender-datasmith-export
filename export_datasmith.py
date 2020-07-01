@@ -41,11 +41,12 @@ def exp_vector(value, exp_list):
 		})
 	return exp_list.push(n)
 
-def exp_color(value, exp_list, name=""):
+def exp_color(value, exp_list, name=None):
 	n = Node("Color", {
-		"Name": name,
 		"constant": "(R=%.6f,G=%.6f,B=%.6f,A=%.6f)"%tuple(value)
 		})
+	if name:
+		n["Name"] = name
 	return exp_list.push(n)
 
 def exp_scalar(value, exp_list):
@@ -1382,9 +1383,10 @@ def pbr_default_material():
 	n = Node("UEPbrMaterial")
 	n["name"] = "DefaultMaterial"
 	exp_list = Node("Expressions")
-
-	basecolor_idx = exp_color((0.8, 0.8, 0.8, 1.0), exp_list)
-	roughness_idx = exp_scalar(0.5, exp_list)
+	grey = 0.906332
+	basecolor_idx = exp_color((grey, grey, grey, 1.0), exp_list)
+	roughness_idx = exp_scalar(0.4, exp_list)
+	n.push(exp_list)
 	n.push(Node("BaseColor", {
 		"expression": basecolor_idx,
 		"OutputIndex": "0"
@@ -1461,9 +1463,11 @@ def fill_umesh(umesh, bl_mesh):
 	m.calc_normals_split()
 
 	#finish inline mesh_copy_triangulate
-
-	for idx, mat in enumerate(bl_mesh.materials):
-		umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
+	if len(bl_mesh.materials) == 0:
+		umesh.materials[0] = 'DefaultMaterial'
+	else:
+		for idx, mat in enumerate(bl_mesh.materials):
+			umesh.materials[idx] = sanitize_name(getattr(mat, 'name', 'DefaultMaterial'))
 
 	polygons = m.polygons
 	num_polygons = len(polygons)
@@ -1686,8 +1690,11 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 					collect_object_metadata(n["name"], "StaticMesh", bl_mesh)
 
 					material_list = datasmith_context["materials"]
-					for slot in bl_obj.material_slots:
-						material_list.append((slot.material, bl_obj))
+					if len(bl_obj.material_slots) == 0:
+						material_list.append((None, bl_obj))
+					else:
+						for slot in bl_obj.material_slots:
+							material_list.append((slot.material, bl_obj))
 
 			if umesh:
 				n.name = 'ActorMesh'
@@ -1722,12 +1729,15 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 				n.name = 'ActorMesh'
 				n.push(Node('mesh', {'name': umesh.name}))
 
-				for idx, slot in enumerate(bl_obj.material_slots):
-					material_list.append((slot.material, bl_obj))
-					if slot.link == 'OBJECT':
-						#collect_materials([slot.material], uscene)
-						safe_name = sanitize_name(slot.material.name)
-						n.push(Node('material', {'id':idx, 'name':safe_name}))
+				if len(bl_obj.material_slots) == 0:
+					material_list.append((None, bl_obj))
+				else:
+					for idx, slot in enumerate(bl_obj.material_slots):
+						material_list.append((slot.material, bl_obj))
+						if slot.link == 'OBJECT':
+							#collect_materials([slot.material], uscene)
+							safe_name = sanitize_name(slot.material.name)
+							n.push(Node('material', {'id':idx, 'name':safe_name}))
 
 		elif bl_obj.type == 'CAMERA':
 
