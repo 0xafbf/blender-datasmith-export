@@ -2,6 +2,44 @@
 All notable changes to this project will be documented in this file.
 Features marked with `*` require the UE4 plugin to work.
 
+
+## [1.0.0] 2020-07-01
+### Added
++ Added support for object and meshes metadata (custom properties in Blender).
++ Added an option to prefer custom nodes to generate simpler graphs if you have the UE4 plugin.*
++ Added new material nodes:
+  - Texture Coordinates (partial support)*
+  - Noise Texture (simulated, not entirely accurate)*
+  - UV Map*
+  - Geometry (partial support)*
+  - Attribute
+  - Combine/Separate RGB/XYZ
+  - Combine/Separate HSV*
+  - Math (some new nodes like SINH, COSH, etc...)*
+  - Vector Math
+  - Vector Math (Round, Wrap, Project, Reflect)*
+  - Mapping (can now do 3d rotations, uses simpler variants when there is no XY rotation)*
+  - Checker Texture*
+
++ **This is a big one:** Object animations are now exported in a Level Sequence.
+
+
+### Fixed
+* Fixed nodegroups with output node named different than "Group Output".
+* Names are now sanitized to be only alphanumeric.
+* Increased size for datasmith_curves image to allow for more baked curves (up to 1024)
+* All UV nodes are upcasted to Vector3 to better reflect Blender operations, and masked down to Vector2 when reading from them.
+* Improved images recollection flow. Unpacked files are directly copied and packed files are written from packed data instead of resaving them (this fixes some strange formats like RG8, which Blender can read and pack, but cannot save).
+* Improved behavior of **ColorRamp** and **RGBCurveLookup** nodes*
+* Improved behavior of RGB sockets connected to VALUE sockets
+* Math nodes with `Clamp` option are now wrapped with a `Saturate` operation.
+* Normal maps with strength different than 1 are now wrapped with a `FlattenNormal` operation.
+* Principled BSDF nodes now write the Specular values.
+* UV maps set as `Render Active` are now set at UV0 to be read as default UVs in UE4. \
+* Improved handling of some meshes with empty materials or no material slots.
+* Tested on **Blender 2.83.1**
+
+
 ## [0.4.0] 2020-03-26
 ### Added
 + Added support for exporting curves as geometry
