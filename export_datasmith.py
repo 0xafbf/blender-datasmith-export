@@ -1918,12 +1918,15 @@ def collect_object_metadata(obj_name, obj_type, obj):
 			# archipack uses some list props, I don't think these are useful
 			# but we should check if there's something specific we should do.
 		else:
-			#if we're here, we will just make sure that we won't write bad data
+			log.error("%s: %s has unsupported metadata with type:%s" % (obj_type, obj_name, prop_type))
+			# write as string, and sanitize output
+			out_type = "String"
 			out_value = str(out_value)
+
+		if out_type == "String":
 			out_value = out_value.replace("<", "&lt;")
 			out_value = out_value.replace(">", "&gt;")
 			out_value = out_value.replace('"', "&quot;")
-			log.error("%s: %s has unsupported metadata with type:%s" % (obj_type, obj_name, prop_type))
 
 		kvp = Node("KeyValueProperty", {"name": prop_name, "val": out_value, "type": out_type } )
 		metadata.push(kvp)
