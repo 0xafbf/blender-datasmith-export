@@ -3,7 +3,7 @@
 bl_info = {
 	"name": "Unreal Datasmith format",
 	"author": "Andrés Botero",
-	"version": (0, 4, 0),
+	"version": (1, 0, 1),
 	"blender": (2, 82, 0),
 	"location": "File > Export > Datasmith (.udatasmith)",
 	"description": "Export scene as Datasmith asset",

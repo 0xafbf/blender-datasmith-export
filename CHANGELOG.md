@@ -2,6 +2,9 @@
 All notable changes to this project will be documented in this file.
 Features marked with `*` require the UE4 plugin to work.
 
+## [1.0.1] 2020-07-24
+### Fixed
+* Fixed an issue when writing some custom props, that would break the XML structure.
 
 ## [1.0.0] 2020-07-01
 ### Added
