@@ -1892,6 +1892,8 @@ def collect_object_metadata(obj_name, obj_type, obj):
 	for prop_name in obj_props:
 		if prop_name in {"_RNA_UI", "cycles", "cycles_visibility"}:
 			continue
+		if prop_name.startswith("archipack_"):
+			continue
 		if metadata is None:
 			names = (obj_type, obj_name)
 			metadata = Node("MetaData", {"name": "%s_%s"%names, "reference":"%s.%s"%names } )
@@ -1912,8 +1914,16 @@ def collect_object_metadata(obj_name, obj_type, obj):
 				continue
 			out_type = "String"
 			out_value = str(prop_value.to_dict())
+		# elif prop_type is list:
+			# archipack uses some list props, I don't think these are useful
+			# but we should check if there's something specific we should do.
 		else:
-			log.error("got metadata with type:%s" % prop_type)
+			#if we're here, we will just make sure that we won't write bad data
+			out_value = str(out_value)
+			out_value = out_value.replace("<", "&lt;")
+			out_value = out_value.replace(">", "&gt;")
+			out_value = out_value.replace('"', "&quot;")
+			log.error("%s: %s has unsupported metadata with type:%s" % (obj_type, obj_name, prop_type))
 
 		kvp = Node("KeyValueProperty", {"name": prop_name, "val": out_value, "type": out_type } )
 		metadata.push(kvp)
