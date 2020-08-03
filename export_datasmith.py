@@ -2075,6 +2075,8 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 		ext = ".hdr"
 	elif image.file_format == 'OPEN_EXR':
 		ext = ".exr"
+	elif image.file_format == 'TARGA' or image.file_format == 'TARGA_RAW':
+		ext = ".tga"
 
 	safe_name = sanitize_name(name) + ext
 	image_path = path.join(basedir, folder_name, safe_name)
