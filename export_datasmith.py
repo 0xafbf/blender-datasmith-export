@@ -19,9 +19,9 @@ matrix_datasmith = Matrix.Scale(100, 4)
 matrix_datasmith[1][1] *= -1.0
 
 matrix_normals = [
-	[-1, 0, 0],
+	[1, 0, 0],
 	[0, -1, 0],
-	[0, 0, -1],
+	[0, 0, 1],
 ]
 
 # used for lights and cameras, whose forward is (0, 0, -1) and its right is (1, 0, 0)
@@ -1451,7 +1451,6 @@ import numpy as np
 def fill_umesh(umesh, bl_mesh):
 	# create copy to triangulate
 	m = bl_mesh.copy()
-	m.transform(matrix_datasmith)
 	bm = bmesh.new()
 	bm.from_mesh(m)
 	bmesh.ops.triangulate(bm, faces=bm.faces[:])
@@ -1461,6 +1460,16 @@ def fill_umesh(umesh, bl_mesh):
 	bm.free()
 	# not sure if this is the best way to read normals
 	m.calc_normals_split()
+
+	loops = m.loops
+	num_loops = len(loops)
+
+	normals = np.empty(num_loops* 3, np.float32)
+	loops.foreach_get("normal", normals)
+	normals = normals.reshape((num_loops, 3))
+	normals = normals @ matrix_normals
+	
+	m.transform(matrix_datasmith)
 
 	#finish inline mesh_copy_triangulate
 	if len(bl_mesh.materials) == 0:
@@ -1493,11 +1502,6 @@ def fill_umesh(umesh, bl_mesh):
 	loops.foreach_get("vertex_index", triangles)
 
 	umesh.triangles = triangles
-
-	normals = np.empty(num_loops* 3, np.float32)
-	loops.foreach_get("normal", normals)
-	normals = normals.reshape((num_loops, 3))
-	normals = normals @ matrix_normals
 
 	umesh.vertex_normals = np.ascontiguousarray(normals, "<f4")
 
