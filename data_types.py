@@ -72,8 +72,11 @@ def is_char_valid(in_char):
 	return False
 
 def sanitize_name(name):
+	first_char = ""
+	if not is_char_valid(name[0]):
+		first_char = "DS"
 	sanitized = "".join(letter if is_char_valid(letter) else '_' for letter in name)
-	return sanitized
+	return first_char + sanitized
 
 def f(x):
 	return '{:6f}'.format(x)
