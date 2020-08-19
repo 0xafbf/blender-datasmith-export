@@ -1248,10 +1248,19 @@ def get_expression_inner(field, exp_list):
 
 			texture_exp = exp_texture(name)
 			if tex_coord:
-				mask = Node("ComponentMask")
-				mask.push(Node("0", tex_coord))
-				mask_expression = { "expression": exp_list.push(mask) }
-				texture_exp.push(Node("Coordinates", mask_expression))
+				if node.projection == 'BOX':
+					proj = Node("FunctionCall", { "Function": "/DatasmithBlenderContent/MaterialFunctions/TexCoord_Box"})
+					proj.push(Node("0", tex_coord))
+					mask_expression = { "expression": exp_list.push(proj) }
+					texture_exp.push(Node("Coordinates", mask_expression))
+				else:
+					if node.projection != 'FLAT':
+						log.error("node TEXTURE_COORDINATE has unhandled projection: %s" % node.projection)
+					mask = Node("ComponentMask")
+					mask.push(Node("0", tex_coord))
+					mask_expression = { "expression": exp_list.push(mask) }
+					texture_exp.push(Node("Coordinates", mask_expression))
+
 			cached_node = exp_list.push(texture_exp)
 			reverse_expressions[node] = cached_node
 
