@@ -1494,7 +1494,8 @@ def fill_umesh(umesh, bl_mesh):
 	polygons.foreach_get("material_index", material_slots)
 	umesh.tris_material_slot = material_slots # [p.material_index for p in m.polygons]
 
-	umesh.tris_smoothing_group = np.zeros(num_polygons, np.uint32)
+	smoothing_groups = m.calc_smooth_groups()[0];
+	umesh.tris_smoothing_group = np.array(smoothing_groups, np.uint32)
 
 	vertices = m.vertices
 	num_vertices = len(vertices)
