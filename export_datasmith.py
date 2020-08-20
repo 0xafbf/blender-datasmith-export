@@ -1781,12 +1781,14 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 			n['enabled'] = '1'
 			n.push(node_value('SourceSize', bl_light.shadow_soft_size * 100))
 			light_intensity = bl_light.energy
-			light_attenuation_radius = 20 * math.pow(bl_light.energy, 0.666666)
+			light_attenuation_radius = 100 * math.sqrt(bl_light.energy)
 			light_color = bl_light.color
 			light_intensity_units = 'Lumens' # can also be 'Candelas' or 'Unitless'
+			light_use_custom_distance = bl_light.use_custom_distance
 
 			if bl_light.type == 'SUN':
 				n['type'] = 'DirectionalLight'
+				light_use_custom_distance = False
 				# light_intensity = bl_light.energy # suns are in lux
 
 			elif bl_light.type == 'SPOT':
@@ -1818,7 +1820,8 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 					"length": size_h * 100,
 					"LightType": "Rect", # can be "Point", "Spot", "Rect"
 				}))
-
+			if light_use_custom_distance:
+				light_attenuation_radius = 100 * bl_light.cutoff_distance
 			# TODO: check how lights work when using a node tree
 			# if bl_light.use_nodes and bl_light.node_tree:
 
