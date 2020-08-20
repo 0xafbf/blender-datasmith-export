@@ -2,6 +2,18 @@
 All notable changes to this project will be documented in this file.
 Features marked with `*` require the UE4 plugin to work.
 
+## [1.0.3] 2020-08-19
+### Added
++ Texture node now supports box projection.
++ Smoothing groups are now written in geometry data.
++ TGA texture support. _Thanks KeyToon9_
+
+### Fixed
+* Vertex normals now export correctly (you may need to use the Triangulate modifier). _Thanks KeyToon9_
+* Fixed image files names when first char is unvalid. _Thanks KeyToon9_
+* Improved light attenuation radius calculation.
+* Animation is now correctly exported for non-root objects.
+
 ## [1.0.2] 2020-07-24
 ### Fixed
 * Fixed an issue when writing some custom props, that would break the XML structure.

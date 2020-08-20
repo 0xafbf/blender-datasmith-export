@@ -48,13 +48,13 @@ if use_diff and os.path.isfile(target_path):
 log.info("Starting automated export")
 
 custom_args = {}
-custom_args["experimental_tex_mode"] = True
+custom_args["use_gamma_hack"] = False
 custom_args["apply_modifiers"] = True
 custom_args["export_animations"] = True
-custom_args["prefer_custom_nodes"] = True
+custom_args["compatibility_mode"] = False
+custom_args["minimal_export"] = False
 custom_args["use_logging"] = True
 custom_args["use_profiling"] = False
-# custom_args["minimal_export"] = True
 
 if "-benchmark" in sys.argv:
 	custom_args["use_logging"] = False

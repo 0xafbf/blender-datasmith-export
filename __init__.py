@@ -3,7 +3,7 @@
 bl_info = {
 	"name": "Unreal Datasmith format",
 	"author": "Andrés Botero",
-	"version": (1, 0, 2),
+	"version": (1, 0, 3),
 	"blender": (2, 82, 0),
 	"location": "File > Export > Datasmith (.udatasmith)",
 	"description": "Export scene as Datasmith asset",
@@ -51,7 +51,7 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 	export_animations: BoolProperty(
 			name="Export animations",
 			description="Export object animations (transforms only)",
-			default=False,
+			default=True,
 		)
 	apply_modifiers: BoolProperty(
 			name="Apply modifiers",
@@ -65,14 +65,15 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 				"transforms or shaders",
 			default=False,
 		)
-	experimental_tex_mode: BoolProperty(
-			name="Use sRGB support (UE4 4.25)",
-			description="Disables the gamma hack to export masks correctly",
-			default=True,
+	use_gamma_hack: BoolProperty(
+			name="Use sRGB gamma hack (UE 4.24 and below)",
+			description="Flags sRGB texture to use gamma as sRGB is not supported in old versions",
+			default=False,
 		)
-	prefer_custom_nodes: BoolProperty(
-			name="Prefer custom nodes",
-			description="Exports simpler node setups for some nodes, requires having the UE4 plugin",
+	compatibility_mode: BoolProperty(
+			name="Compatibility mode",
+			description="Enable this if you don't have the UE4 plugin, "
+				"Improves material nodes support, but at a reduced quality",
 			default=False,
 		)
 	use_logging: BoolProperty(

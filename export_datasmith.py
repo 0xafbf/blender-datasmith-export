@@ -739,8 +739,8 @@ def exp_color_ramp(from_node, exp_list):
 	level = get_expression(from_node.inputs['Fac'], exp_list)
 
 	curve_idx = exp_scalar(idx, exp_list)
-	prefer_custom_nodes = datasmith_context["prefer_custom_nodes"]
-	if not prefer_custom_nodes:
+	compatibility_mode = datasmith_context["compatibility_mode"]
+	if compatibility_mode:
 		pixel_offset = exp_scalar(0.5, exp_list)
 		vertical_res = exp_scalar(1/DATASMITH_TEXTURE_SIZE, exp_list) # curves texture size
 		n = Node("Add")
@@ -1477,7 +1477,7 @@ def fill_umesh(umesh, bl_mesh):
 	loops.foreach_get("normal", normals)
 	normals = normals.reshape((num_loops, 3))
 	normals = normals @ matrix_normals
-	
+
 	m.transform(matrix_datasmith)
 
 	#finish inline mesh_copy_triangulate
@@ -2080,7 +2080,7 @@ TEXTURE_MODE_OTHER = "5"
 TEXTURE_MODE_BUMP = "6" # this converts textures to normal maps automatically
 
 # saves image, and generates node with image description to add to export
-def save_texture(texture, basedir, folder_name, minimal_export = False, experimental_tex_mode=True):
+def save_texture(texture, basedir, folder_name, minimal_export = False, use_gamma_hack=False):
 	name, image, img_type = texture
 
 	log.info("writing texture:"+name)
@@ -2131,8 +2131,7 @@ def save_texture(texture, basedir, folder_name, minimal_export = False, experime
 	elif image.colorspace_settings.is_data:
 		n['texturemode'] = TEXTURE_MODE_SPECULAR
 		n['srgb'] = "2" # only read on 4.25 onwards, but we can still write it
-		if not experimental_tex_mode:
-			# use this hack if not using experimental mode
+		if use_gamma_hack:
 			n['rgbcurve'] = "0.454545"
 
 	n['texturefilter'] = "3"
@@ -2164,7 +2163,7 @@ def collect_and_save(context, args, save_path):
 		"materials": [],
 		"material_curves": None,
 		"metadata": [],
-		"prefer_custom_nodes": args["prefer_custom_nodes"],
+		"compatibility_mode": args["compatibility_mode"],
 	}
 
 	log.info("collecting objects")
@@ -2348,9 +2347,9 @@ def collect_and_save(context, args, save_path):
 	log.info("writing textures")
 
 	tex_nodes = []
-	use_experimental_tex_mode = args["experimental_tex_mode"]
+	use_gamma_hack = args["use_gamma_hack"]
 	for tex in datasmith_context["textures"]:
-		tex_node = save_texture(tex, basedir, folder_name, minimal_export, use_experimental_tex_mode)
+		tex_node = save_texture(tex, basedir, folder_name, minimal_export, use_gamma_hack)
 		tex_nodes.append(tex_node)
 
 	log.info("building XML tree")
@@ -2372,7 +2371,6 @@ def collect_and_save(context, args, save_path):
 	for mat in material_nodes:
 		n.push(mat)
 
-	print("Using experimental tex mode:%s", use_experimental_tex_mode)
 	for tex in tex_nodes:
 		n.push(tex)
 
