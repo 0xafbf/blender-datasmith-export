@@ -1597,7 +1597,7 @@ def collect_object(
 	child_nodes = []
 
 	for child in bl_obj.children:
-		new_obj = collect_object(child, selected_only=selected_only, apply_modifiers=apply_modifiers)
+		new_obj = collect_object(child, selected_only=selected_only, apply_modifiers=apply_modifiers, export_animations=export_animations)
 		if new_obj:
 			child_nodes.append(new_obj)
 

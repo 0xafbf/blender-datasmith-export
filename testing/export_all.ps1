@@ -36,8 +36,7 @@ Measure-Command -Expression {
     }
 }
 
-# best time: 4:18 without barbershop
-# best time: 6:05 while streaming
+# best time: 9:05, intel i7 4790k
 
 
 Pop-Location
