@@ -2,6 +2,11 @@
 All notable changes to this project will be documented in this file.
 Features marked with `*` require the UE4 plugin to work.
 
+## [Unreleased]
+### Fixed
+* Export metadata is now a flag, off by default, to help in case other addons store info there.
+
+
 ## [1.0.3] 2020-08-19
 ### Added
 + Texture node now supports box projection.

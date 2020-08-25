@@ -1581,6 +1581,7 @@ def collect_object(
 	selected_only=False,
 	apply_modifiers=False,
 	export_animations=False,
+	export_metadata=False,
 ):
 
 	n = Node('Actor')
@@ -1597,7 +1598,12 @@ def collect_object(
 	child_nodes = []
 
 	for child in bl_obj.children:
-		new_obj = collect_object(child, selected_only=selected_only, apply_modifiers=apply_modifiers, export_animations=export_animations)
+		new_obj = collect_object(child,
+			selected_only=selected_only,
+			apply_modifiers=apply_modifiers,
+			export_animations=export_animations,
+			export_metadata = export_metadata,
+		)
 		if new_obj:
 			child_nodes.append(new_obj)
 
@@ -1640,20 +1646,22 @@ def collect_object(
 						selected_only=False, # if is instancer, maybe all child want to be instanced
 						apply_modifiers=False, # if is instancer, applying modifiers may end in a lot of meshes
 						export_animations=False, # TODO: test how would animation work mixed with instancing
-						)
+						export_metadata=False,
+					)
 					child_nodes.append(new_obj)
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
 
-		collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph)
+		collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, export_metadata)
 
 	# todo: maybe make some assumptions? like if obj is probe or reflection, don't add to animated objects list
 
 	if export_animations:
 		datasmith_context["anim_objects"].append((bl_obj, n["name"], obj_mat))
 
+	if export_metadata:
+		collect_object_metadata(n["name"], "Actor", bl_obj)
 
-	collect_object_metadata(n["name"], "Actor", bl_obj)
 	# just to make children appear last
 	n.push(transform)
 
@@ -1668,7 +1676,7 @@ def collect_object(
 	return n
 
 
-def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
+def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, export_metadata=False):
 		# I think that these should be ordered by how common they are
 		if bl_obj.type == 'EMPTY':
 			pass
@@ -1701,7 +1709,8 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph):
 					meshes.append(umesh)
 					fill_umesh(umesh, bl_mesh)
 
-					collect_object_metadata(n["name"], "StaticMesh", bl_mesh)
+					if export_metadata:
+						collect_object_metadata(n["name"], "StaticMesh", bl_mesh)
 
 					material_list = datasmith_context["materials"]
 					if len(bl_obj.material_slots) == 0:
@@ -2183,12 +2192,14 @@ def collect_and_save(context, args, save_path):
 		frame_start = context.scene.frame_start
 		frame_end = context.scene.frame_end
 
+	write_metadata = args["write_metadata"]
 
 	for obj in root_objects:
 		uobj = collect_object(obj,
 			selected_only=selected_only,
 			apply_modifiers=apply_modifiers,
 			export_animations=export_animations,
+			export_metadata=write_metadata,
 		)
 		if uobj:
 			objects.append(uobj)

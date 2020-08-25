@@ -55,6 +55,7 @@ custom_args["compatibility_mode"] = False
 custom_args["minimal_export"] = False
 custom_args["use_logging"] = True
 custom_args["use_profiling"] = False
+custom_args["write_metadata"] = False
 
 if "-benchmark" in sys.argv:
 	custom_args["use_logging"] = False

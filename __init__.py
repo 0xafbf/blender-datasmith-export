@@ -76,6 +76,12 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 				"Improves material nodes support, but at a reduced quality",
 			default=False,
 		)
+	write_metadata: BoolProperty(
+			name="Write metadata",
+			description="Writes custom properties of objects and meshes as metadata."
+				"It may be useful to disable this when using certain addons",
+			default=True,
+		)
 	use_logging: BoolProperty(
 			name="Enable logging",
 			description="Enable logging to Window > System console",
