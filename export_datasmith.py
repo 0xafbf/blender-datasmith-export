@@ -1594,7 +1594,6 @@ def collect_object(
 	n['layer'] = bl_obj.users_collection[0].name_full
 
 
-
 	child_nodes = []
 
 	for child in bl_obj.children:
@@ -1667,6 +1666,8 @@ def collect_object(
 
 	if len(child_nodes) > 0:
 		children_node = Node("children");
+		# strange, this visibility flag is read from the "children" node. . . 
+		children_node["visible"] = not bl_obj.hide_render
 		for child in child_nodes:
 			if child:
 				children_node.push(child)
