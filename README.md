@@ -19,10 +19,15 @@ Check out an overview of a previous version here:
 https://youtu.be/bUUDqerdqAc
 
 ## Sample:
+You can click the images to open a large preview.
+
 __Blender Eevee:__
-![Blender Eevee render](docs/blender.jpg)
+
+<img alt="Blender Eevee render" src="docs/blender.jpg" width="300">
+
 __UE4 using Datasmith:__
-![UE4 render](docs/unreal.jpg)
+
+<img alt="UE4 render" src="docs/unreal.jpg" width="300">
 
 This result relies on the **DatasmithBlenderContent**, which is a UE4 Plugin
 that improves material import compatibility. Consider supporting the project by
@@ -37,10 +42,38 @@ branch.
 
 [ue4 fork]: https://github.com/0xafbf/UnrealEngine/tree/master
 
+## Installation:
+
 Now [__Download the latest development version__][download_link] and install
 from the Blender addons preferences pane.
 
 [download_link]: https://github.com/0xafbf/blender-datasmith-export/archive/master.zip
+
+## Frequently Asked Questions:
+
+__Q: Does this support weighted normals/smoothing groups?__
+
+A: Yes, but the plugin is unable to triangulate correctly. For the time
+being, you can add a `Triangulate` modifier with the `Keep Normals` option to
+work around this.
+
+__Q: Why are some material nodes not exported?__
+
+A: Most of the nodes are exported, but not all of them are imported from the
+UE4 side. The Datasmith Blender Additions (mentioned above) improves this by
+adding implementations for some of these nodes. There is a
+[list of nodes in the wiki] with more information on which nodes are
+supported, and which require the UE4 plugin to work.
+
+[list of nodes in the wiki]: https://github.com/0xafbf/blender-datasmith-export/wiki/Supported-Material-Nodes
+
+__Q: What is this "custom build" you talked about earlier?__
+A: I modified some of the UE4 build to fix a couple of errors when importing
+the scenes generated from Blender. These are related to normal maps import
+and very specific import issues with lights. If you're interested you can
+check this [custom build discussion].
+
+[custom build discussion]: https://github.com/0xafbf/blender-datasmith-export/issues/25
 
 If you want to support the project, consider supporting via [Patreon].
 
