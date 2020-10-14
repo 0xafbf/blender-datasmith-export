@@ -5,7 +5,7 @@ Features marked with `*` require the UE4 plugin to work.
 ## [Unreleased]
 ### Fixed
 * Export metadata is now a flag, off by default, to help in case other addons store info there.
-
+* Libraries with long file paths are now referenced by the blend file name only.
 
 ## [1.0.3] 2020-08-19
 ### Added
