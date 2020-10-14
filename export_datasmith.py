@@ -1690,6 +1690,7 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, e
 				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
 
 			if bl_mesh.library:
+				libraries_dict = datasmith_context["libraries"]
 				prefix = libraries_dict.get(bl_mesh.library)
 
 				if prefix is None:
@@ -2187,6 +2188,7 @@ def collect_and_save(context, args, save_path):
 		"material_curves": None,
 		"metadata": [],
 		"compatibility_mode": args["compatibility_mode"],
+		"libraries": {},
 	}
 
 	log.info("collecting objects")
