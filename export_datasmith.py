@@ -1690,10 +1690,23 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, e
 				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
 
 			if bl_mesh.library:
-				lib_path = bpy.path.clean_name(bl_mesh.library.filepath)
-				prefix = lib_path.strip("_")
-				if prefix.endswith("_blend"):
-					prefix = prefix[:-6] + "_"
+				prefix = libraries_dict.get(bl_mesh.library)
+
+				if prefix is None:
+					lib_filename = bpy.path.basename(bl_mesh.library.filepath)
+					lib_clean_name = bpy.path.clean_name(lib_filename)
+					prefix = lib_clean_name.strip("_")
+					if prefix.endswith("_blend"):
+						prefix = prefix[:-5] # leave the underscore
+					next_prefix = prefix
+					try_count = 1
+					libraries_prefixes = libraries_dict.values()
+					# just to reaaally make sure there are no collisions
+					while next_prefix in libraries_prefixes:
+						next_prefix = "%s%d_" % (prefix, try_count)
+						try_count += 1
+					libraries_dict[bl_mesh.library] = next_prefix
+					prefix = next_prefix
 				bl_mesh_name = prefix + bl_mesh_name
 
 
