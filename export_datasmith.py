@@ -489,6 +489,8 @@ op_custom_functions = {
 	"MAPPING_NORMAL":      "/DatasmithBlenderContent/MaterialFunctions/MappingNormal",
 	"NORMAL_FROM_HEIGHT": "/Engine/Functions/Engine_MaterialFunctions03/Procedurals/NormalFromHeightmap",
 	"WORLD_POSITION":     "/DatasmithBlenderContent/MaterialFunctions/BlenderWorldPosition",
+	"MAP_RANGE_LINEAR":   "/Engine/Functions/Engine_MaterialFunctions03/Math/RemapValueRange",
+	"SMOOTHSTEP":         "/Engine/Functions/Engine_MaterialFunctions02/SmoothStep",
 }
 
 
@@ -904,6 +906,46 @@ def exp_fresnel(node, exp_list):
 	n.push(Node("0", exp_ior))
 	return exp_list.push(n)
 
+def exp_map_range(node, exp_list):
+	if node.interpolation_type == 'LINEAR':
+		n = Node("FunctionCall", { "Function": op_custom_functions["MAP_RANGE_LINEAR"] })
+		exp_value = get_expression(node.inputs['Value'], exp_list)
+		n.push(Node("0", exp_value))
+		exp_from_min = get_expression(node.inputs['From Min'], exp_list)
+		n.push(Node("1", exp_from_min))
+		exp_from_max = get_expression(node.inputs['From Max'], exp_list)
+		n.push(Node("2", exp_from_max))
+		exp_to_min = get_expression(node.inputs['To Min'], exp_list)
+		n.push(Node("3", exp_to_min))
+		exp_to_max = get_expression(node.inputs['To Max'], exp_list)
+		n.push(Node("4", exp_to_max))
+		exp = { "expression": exp_list.push(n) }
+		if node.clamp:
+			clamp = Node("Clamp")
+			clamp.push(Node("0", exp))
+			clamp.push(Node("1", exp_to_min))
+			clamp.push(Node("2", exp_to_max))
+			exp = { "expression": exp_list.push(clamp) }
+		return exp
+	elif node.interpolation_type == 'SMOOTHSTEP':
+		smoothstep = Node("FunctionCall", { "Function": op_custom_functions["SMOOTHSTEP"] })
+		exp_value = get_expression(node.inputs['Value'], exp_list)
+		smoothstep.push(Node("0", exp_value))
+		exp_from_min = get_expression(node.inputs['From Min'], exp_list)
+		smoothstep.push(Node("1", exp_from_min))
+		exp_from_max = get_expression(node.inputs['From Max'], exp_list)
+		smoothstep.push(Node("2", exp_from_max))
+		n = Node("FunctionCall", { "Function": op_custom_functions["MAP_RANGE_LINEAR"] })
+		n.push(Node("0", { "expression": exp_list.push(smoothstep) }))
+		n.push(Node("1", {"expression": exp_scalar(0.0, exp_list)}))
+		n.push(Node("2", {"expression": exp_scalar(1.0, exp_list)}))
+		exp_to_min = get_expression(node.inputs['To Min'], exp_list)
+		n.push(Node("3", exp_to_min))
+		exp_to_max = get_expression(node.inputs['To Max'], exp_list)
+		n.push(Node("4", exp_to_max))
+		return { "expression": exp_list.push(n) }
+
+	log.error("MAP_RANGE node interpolation type:%s not found" % node.interpolation_type)
 
 context_stack = []
 def push_context(context):
@@ -1338,6 +1380,8 @@ def get_expression_inner(field, exp_list):
 		return exp_math(node, exp_list)
 	if node.type == 'VECT_MATH':
 		return exp_vect_math(node, exp_list)
+	if node.type == 'MAP_RANGE':
+		return exp_map_range(node, exp_list)
 
 	# if node.type == 'SHADERTORGB':
 
