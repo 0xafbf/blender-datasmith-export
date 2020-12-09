@@ -898,6 +898,13 @@ def exp_attribute(socket, exp_list):
 		ret = {"expression": dot_exp}
 	return ret
 
+def exp_vertex_color(socket, exp_list):
+	exp = exp_list.push(Node("VertexColor"))
+	if socket.name == "Color":
+		return {"expression": exp, "OutputIndex": 0}
+	elif socket.name == "Alpha":
+		return {"expression": exp, "OutputIndex": 4}
+
 def exp_fresnel(node, exp_list):
 	n = Node("FunctionCall", { "Function": op_custom_functions["FRESNEL"]})
 	exp_ior = get_expression(node.inputs['IOR'], exp_list)
@@ -1178,6 +1185,8 @@ def get_expression_inner(field, exp_list):
 	# if node.type == 'AMBIENT_OCCLUSION':
 	if node.type == 'ATTRIBUTE':
 		return exp_attribute(socket, exp_list)
+	if node.type == 'VERTEX_COLOR':
+		return exp_vertex_color(socket, exp_list)
 
 	# if node.type == 'BEVEL':
 	# if node.type == 'CAMERA':
