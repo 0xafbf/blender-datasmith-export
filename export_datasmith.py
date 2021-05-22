@@ -2264,7 +2264,7 @@ def collect_and_save(context, args, save_path):
 		anims_strings = []
 		# write phase:
 		to_deg = 360 / math.tau
-		rot_fix = np.array((to_deg, -to_deg, to_deg))
+		rot_fix = np.array((-to_deg, -to_deg, to_deg))
 		for idx, timeline in enumerate(object_timelines):
 			if not object_animates[idx]:
 				continue
