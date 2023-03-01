@@ -1591,6 +1591,9 @@ def collect_object(
 	apply_modifiers=False,
 	export_animations=False,
 	export_metadata=False,
+	add_triangulate_weighted=False,
+	add_triangulate_weighted_no_mods=False,
+	linked_mapping = {},
 ):
 
 	n = Node('Actor')
@@ -1611,6 +1614,9 @@ def collect_object(
 			apply_modifiers=apply_modifiers,
 			export_animations=export_animations,
 			export_metadata = export_metadata,
+			add_triangulate_weighted=add_triangulate_weighted,
+			add_triangulate_weighted_no_mods=add_triangulate_weighted_no_mods,
+			linked_mapping = linked_mapping,
 		)
 		if new_obj:
 			child_nodes.append(new_obj)
@@ -1659,8 +1665,7 @@ def collect_object(
 					child_nodes.append(new_obj)
 					#dups.append((dup.instance_object.original, dup.matrix_world.copy()))
 					dup_idx += 1
-
-		collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, export_metadata)
+		collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, add_triangulate_weighted, add_triangulate_weighted_no_mods, linked_mapping, export_metadata)
 
 	# todo: maybe make some assumptions? like if obj is probe or reflection, don't add to animated objects list
 
@@ -1686,17 +1691,50 @@ def collect_object(
 	return n
 
 
-def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, export_metadata=False):
+def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, add_triangulate_weighted, add_triangulate_weighted_no_mods, linked_mapping, export_metadata=False):
 		# I think that these should be ordered by how common they are
 		if bl_obj.type == 'EMPTY':
 			pass
 		elif bl_obj.type == 'MESH':
 			bl_mesh = bl_obj.data
 			bl_mesh_name = bl_mesh.name
+			previous_active_obj = bpy.context.active_object
+			previous_active = bl_obj.select_get()
+			
+			mods = bl_obj.modifiers
+			mods_applied = False
+			using_mapped_mesh = False
+			had_mods = len(mods) > 0
+			if apply_modifiers and add_triangulate_weighted and (not add_triangulate_weighted_no_mods or (add_triangulate_weighted_no_mods and not had_mods)):
+				if not had_mods and (bl_mesh in linked_mapping):
+					# We are using a linked mesh with no modifiers per default that was already processed,
+					# reuse that
+					bl_mesh_name = linked_mapping[bl_mesh]
+					using_mapped_mesh = True
+					print("Reusing mapped mesh: " + bl_mesh_name)
+				else:
+					mods_applied = True
+					# need to set object to the be the active object to apply the modifiers
+					bpy.context.view_layer.objects.active = bl_obj
+					bpy.ops.object.modifier_add(type='TRIANGULATE')
+					bpy.ops.object.modifier_add(type='WEIGHTED_NORMAL')
+					mods[len(mods)-1].keep_sharp = True # Activate 'Keep Sharp' flag on the Weighted Normal modifier
 
-			if bl_obj.modifiers and apply_modifiers:
+			
+			if bl_obj.modifiers and apply_modifiers and not using_mapped_mesh:
+				bl_mesh_original = bl_mesh
 				bl_mesh = bl_obj.evaluated_get(depsgraph).to_mesh()
 				bl_mesh_name = "%s__%s" % (bl_obj.name, bl_mesh.name)
+				if not had_mods:
+					linked_mapping[bl_mesh_original] = bl_mesh_name
+
+			if mods_applied:
+				# remove triangulate and weighted normal modifiers again
+				mods.remove(mods[len(mods)-1])
+				mods.remove(mods[len(mods)-1])
+				# restore active object
+				bl_obj.select_set(previous_active)
+				bpy.context.view_layer.objects.active = previous_active_obj
 
 			if bl_mesh.library:
 				libraries_dict = datasmith_context["libraries"]
@@ -1726,7 +1764,9 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, e
 			for mesh in meshes:
 				if bl_mesh_name == mesh.name:
 					umesh = mesh
+					print("found existing mesh for: " + bl_mesh_name)
 
+			print("using name: " + bl_mesh_name)
 			if umesh == None:
 				if len(bl_mesh.polygons) > 0:
 					umesh = UDMesh(bl_mesh_name)
@@ -1913,6 +1953,7 @@ def collect_object_custom_data(bl_obj, n, apply_modifiers, obj_mat, depsgraph, e
 			pass
 		else:
 			log.error("unrecognized object type: %s" % bl_obj.type)
+
 
 
 
@@ -2218,13 +2259,16 @@ def collect_and_save(context, args, save_path):
 		frame_end = context.scene.frame_end
 
 	write_metadata = args["write_metadata"]
-
+	linked_mapping = {}
 	for obj in root_objects:
 		uobj = collect_object(obj,
 			selected_only=selected_only,
 			apply_modifiers=apply_modifiers,
 			export_animations=export_animations,
 			export_metadata=write_metadata,
+			add_triangulate_weighted=args["add_triangulate_weighted"],
+			add_triangulate_weighted_no_mods=args["add_triangulate_weighted_no_mods"],
+			linked_mapping = linked_mapping,
 		)
 		if uobj:
 			objects.append(uobj)

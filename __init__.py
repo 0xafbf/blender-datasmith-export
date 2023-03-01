@@ -92,6 +92,16 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			description="For development only, writes a python profile 'datasmith.prof'",
 			default=False,
 		)
+	add_triangulate_weighted: BoolProperty(
+			name="Add Triangulate & WeightedNormals",
+			description="During export add a Triangulate and Weighted Normals modifiers to the mesh. This will override the default triangulation of the plugin.",
+			default=True,
+		)
+	add_triangulate_weighted_no_mods: BoolProperty(
+			name="Only if no modifiers",
+			description="Only apply the Triangulate & WeightedNormals modifiers when no other modifiers are on the object.",
+			default=True,
+	)
 
 	def execute(self, context):
 		keywords = self.as_keywords(ignore=("filter_glob",))
@@ -108,6 +118,29 @@ class ExportDatasmith(bpy.types.Operator, ExportHelper):
 			path = "datasmith.prof"
 			pr.dump_stats(path)
 			return result
+
+	def draw(self, context):
+		layout = self.layout
+		layout.prop(self, 'export_selected')
+		layout.prop(self, 'export_animations')
+		layout.prop(self, 'apply_modifiers')
+
+		col = layout.box()
+		col.active = self.apply_modifiers
+		col.prop(self, 'add_triangulate_weighted')
+
+		col = col.box()
+		col.active = self.add_triangulate_weighted
+		col.prop(self, 'add_triangulate_weighted_no_mods')
+
+		layout.prop(self, 'minimal_export')
+		layout.prop(self, 'use_gamma_hack')
+		layout.prop(self, 'compatibility_mode')
+		layout.prop(self, 'write_metadata')
+		layout.prop(self, 'use_logging')
+		layout.prop(self, 'use_profiling')
+
+		
 
 def menu_func_export(self, context):
 	self.layout.operator(ExportDatasmith.bl_idname, text="Datasmith (.udatasmith)")
